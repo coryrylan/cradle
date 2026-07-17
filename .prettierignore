@@ -1,0 +1,8 @@
+node_modules
+projects/**/dist
+projects/**/.wireit
+projects/**/.coverage
+projects/**/CHANGELOG.md
+bun.lock
+*.bun-build
+.claude/settings.local.json

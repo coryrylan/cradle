@@ -1,0 +1,233 @@
+{
+  "name": "@coryrylan/cradle",
+  "version": "0.0.0",
+  "description": "A runtime for portable agents defined as folders — launches the pi coding agent configured from an agent folder, sandboxed with nono",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "cradle": "dist/index.js"
+  },
+  "files": [
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "package.json",
+    "dist/index.js",
+    "dist/**/*.d.ts",
+    "!dist/**/*.test.d.ts"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coryrylan/cradle.git",
+    "directory": "projects/cli"
+  },
+  "keywords": [
+    "pi",
+    "agents",
+    "agent-folders",
+    "sandbox",
+    "nono",
+    "cli",
+    "bun"
+  ],
+  "author": "Cory Rylan (https://coryrylan.com)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/coryrylan/cradle/issues"
+  },
+  "homepage": "https://github.com/coryrylan/cradle/tree/main/projects/cli#readme",
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "start": "wireit",
+    "ci": "wireit",
+    "ci:nocache": "bun run clean && bun run ci",
+    "clean": "rm -rf dist",
+    "test": "wireit",
+    "test:coverage": "wireit",
+    "lint": "wireit",
+    "build": "wireit",
+    "install:local": "wireit",
+    "uninstall:local": "wireit",
+    "release": "wireit"
+  },
+  "wireit": {
+    "start": {
+      "command": "bun src/index.ts",
+      "cache": false
+    },
+    "ci": {
+      "dependencies": [
+        "lint",
+        "build",
+        "test:coverage"
+      ]
+    },
+    "test": {
+      "command": "bun test",
+      "files": [
+        "src/**/*.ts",
+        "src/**/*.json",
+        "src/**/*.txt",
+        "tsconfig.json",
+        "bunfig.toml"
+      ],
+      "output": []
+    },
+    "test:coverage": {
+      "command": "bun test --coverage",
+      "files": [
+        "src/**/*.ts",
+        "src/**/*.json",
+        "src/**/*.txt",
+        "tsconfig.json",
+        "bunfig.toml"
+      ],
+      "output": []
+    },
+    "lint": {
+      "command": "eslint .",
+      "files": [
+        "src/**/*.ts",
+        "eslint.config.js",
+        "package.json"
+      ],
+      "output": []
+    },
+    "build": {
+      "dependencies": [
+        "build:js",
+        "build:tsc",
+        "build:darwin-arm64",
+        "build:darwin-x64",
+        "build:linux-x64",
+        "build:linux-arm64",
+        "build:windows-x64"
+      ]
+    },
+    "build:js": {
+      "command": "bun build ./src/index.ts --outdir=./dist --target=bun --format=esm --minify",
+      "files": [
+        "src/**/*.ts",
+        "src/**/*.json",
+        "src/**/*.txt",
+        "tsconfig.json"
+      ],
+      "output": [
+        "dist/index.js"
+      ]
+    },
+    "build:tsc": {
+      "command": "tsc --emitDeclarationOnly --project tsconfig.types.json",
+      "files": [
+        "src/**/*.ts",
+        "src/**/*.json",
+        "tsconfig.json",
+        "tsconfig.types.json"
+      ],
+      "output": [
+        "dist/**/*.d.ts"
+      ]
+    },
+    "build:darwin-arm64": {
+      "command": "bun build --compile --minify src/index.ts --target=bun-darwin-arm64 --outfile dist/cradle-macos-arm64",
+      "files": [
+        "src/**/*.ts",
+        "src/**/*.json",
+        "src/**/*.txt",
+        "tsconfig.json"
+      ],
+      "output": [
+        "dist/cradle-macos-arm64"
+      ]
+    },
+    "build:darwin-x64": {
+      "command": "bun build --compile --minify src/index.ts --target=bun-darwin-x64 --outfile dist/cradle-macos-x64",
+      "files": [
+        "src/**/*.ts",
+        "src/**/*.json",
+        "src/**/*.txt",
+        "tsconfig.json"
+      ],
+      "output": [
+        "dist/cradle-macos-x64"
+      ]
+    },
+    "build:linux-x64": {
+      "command": "bun build --compile --minify src/index.ts --target=bun-linux-x64 --outfile dist/cradle-linux-x64",
+      "files": [
+        "src/**/*.ts",
+        "src/**/*.json",
+        "src/**/*.txt",
+        "tsconfig.json"
+      ],
+      "output": [
+        "dist/cradle-linux-x64"
+      ]
+    },
+    "build:linux-arm64": {
+      "command": "bun build --compile --minify src/index.ts --target=bun-linux-arm64 --outfile dist/cradle-linux-arm64",
+      "files": [
+        "src/**/*.ts",
+        "src/**/*.json",
+        "src/**/*.txt",
+        "tsconfig.json"
+      ],
+      "output": [
+        "dist/cradle-linux-arm64"
+      ]
+    },
+    "build:windows-x64": {
+      "command": "bun build --compile --minify src/index.ts --target=bun-windows-x64 --outfile dist/cradle-windows-x64.exe",
+      "files": [
+        "src/**/*.ts",
+        "src/**/*.json",
+        "src/**/*.txt",
+        "tsconfig.json"
+      ],
+      "output": [
+        "dist/cradle-windows-x64.exe"
+      ]
+    },
+    "install:local": {
+      "dependencies": [
+        "build"
+      ],
+      "command": "bash install.sh",
+      "cache": false
+    },
+    "uninstall:local": {
+      "command": "rm -f \"$HOME/.local/bin/cradle\"",
+      "cache": false
+    },
+    "release": {
+      "command": "HUSKY=0 bun x semantic-release",
+      "dependencies": [
+        "ci"
+      ]
+    }
+  },
+  "dependencies": {
+    "yargs": "18.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/yargs": "17.0.35",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "defaultProvider": "ollama",
+  "defaultModel": "qwen3.6:27b-mlx",
+  "defaultThinkingLevel": "low"
+}

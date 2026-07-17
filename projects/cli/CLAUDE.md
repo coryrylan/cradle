@@ -1,0 +1,98 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this `projects/cli` package.
+
+## Project Overview
+
+`cradle` is a runtime for portable agents defined as folders (see the repo-root [`ARCHITECTURE.md`](../../ARCHITECTURE.md) for the folder format spec). `cradle start <dir>` reads an agent folder — `APPEND_SYSTEM.md` plus optional pi-native `settings.json`/`models.json`, `skills/`, `extensions/`, `sandbox/nono.json` — and launches the [pi](https://github.com/earendil-works/pi-mono) coding agent configured from it. A folder declaring `sandbox/nono.json` is wrapped in the [`nono`](https://github.com/always-further/nono) filesystem sandbox via `nono run`. Bun runs TypeScript natively (no compile step for dev) and compiles the CLI into standalone platform-specific binaries that deploy statically with the docs site, installed via `curl -fsSL https://coryrylan.github.io/cradle/install.sh | bash` (the primary install path; the npm package `@coryrylan/cradle` is the alternative). Shelling out to `nono` (rather than embedding a native addon) keeps the binary a clean `bun build --compile` target on every platform.
+
+## Architecture
+
+- **Entry**: `src/index.ts` (shebang `#!/usr/bin/env bun`) → imports `src/cli.ts`, which wires the commands via Yargs.
+- **Commands** (`src/commands/`): `start` (resolve the ref — bare alias name or path, see `agent/aliases.ts` — → load agent folder → generate extensions → when `sandbox/nono.json` is present, generate the per-agent nono profile → compose the pi/nono argv → spawn), `doctor` (probe `pi` (required), `nono` (recommended and required only for a sandboxed run), and `mise` (recommended — cradle never invokes it, but resolves pi/nono from its shims and the sandbox profile assumes its layout); only missing `pi` fails its exit code; each found bin's `--version` output is probed and reported alongside its resolved path). There is no standalone `setup` command: the nono-presence check (`requireBin('nono')`) and the per-agent profile generation happen inline only for sandboxed `cradle start` runs.
+- **Agent folder runtime** (`src/agent/`) — the core of the package:
+  - `aliases.ts` — resolves a `cradle start <ref>` reference into a folder path before `folder.ts` loads it. A bare name (no path separators, not `.`/`~`-led) is looked up in a global alias table at `<home>/.cradle/settings.json` (`{"agents": {"name": {"path": "/abs/..."}}}`); anything already path-shaped is never an alias lookup. `commands/start.ts`'s `planStart` calls `resolveAgentRef` first, so the resolved absolute path is what `loadAgentFolder`, `stateDirFor`, and the generated nono profile all see — `cradle start my-agent` and the equivalent absolute path share one state dir. This table is config, not state: its path derives from `home` only, entirely apart from `CRADLE_STATE_DIR` (the state root, `src/agent/state.ts`). Malformed JSON is a hard error; a malformed alias entry warns and drops (cradle is this file's schema authority, unlike an agent folder's own pi-native `settings.json`).
+  - `folder.ts` — loader/validator. Missing `APPEND_SYSTEM.md` and malformed JSON are hard errors (a legacy `AGENTS.md` gets a rename hint); everything else unexpected (unknown files, reserved dirs) is a warning + continue. `sandbox/nono.json` supports `sandbox` (boolean opt-out, folded into `AgentSandbox.posture: 'unconfigured' | 'enabled' | 'disabled'` — a missing `sandbox/nono.json` is `'unconfigured'`, a present file without `"sandbox": false` is `'enabled'`, `{"sandbox": false}` is `'disabled'`), `network` (→ `AgentSandbox.network`: a curated subset of nono's canonical profile `network` keys — `block`/`network_profile`/`allow_domain`/`open_port`/`listen_port` → camelCased `AgentNetwork`; warn-and-drop malformed entries; folded into the generated profile's `network` block by `profiles.ts`, disclosed by nono's banner under `--verbose`; a lingering `net` key gets a targeted `"net" was removed — use "network"` hint, mirroring the `AGENTS.md` rename hint), `filesystem` grants (also folded into the profile, disclosed by nono's banner under `--verbose`), and `unsafe_macos_seatbelt_rules` (array of raw Seatbelt s-exprs → `AgentSandbox.unsafeMacosSeatbeltRules`; each must be parenthesized — `readSeatbeltRules` warns+drops the rest, mirroring `readStringList`'s path guard; merged after the base's rules in `profiles.ts`; nono's banner does NOT list seatbelt rules — audit them in the folder's `sandbox/nono.json` or the generated profile). The two-rule set `(allow mach-register)` + `(allow iokit-open)` (plus Chrome's own `--no-sandbox`) is what lets agent-browser + Chrome run sandboxed — see the CLI README / `examples/browser`. Sandbox precedence (resolved in `commands/start.ts`): explicit `--sandbox`/`--no-sandbox` CLI flag > folder `sandbox/nono.json` (`AgentSandbox.posture` `'enabled'`/`'disabled'`) > restrictive network flags (`--offline`/`--allow-host`, which imply the sandbox — requesting a network policy is only enforceable inside it) > unsandboxed default. A posture of `'unconfigured'` (no `sandbox/nono.json`) or `'disabled'` (folder opt-out) appends a loud warning to the plan; a `sandbox/` dir with no `nono.json` warns at load too. Network precedence (also `commands/start.ts` `resolveNetwork`): `--offline` (→ `{block:true}`) > `--allow-host <host>` (repeatable → `{allowDomain}`) > folder `network` > open default (no `network` block emitted); CLI flags REPLACE the folder network (no merge). `--offline`/`--allow-host` force the sandbox on (same as `--sandbox`) unless `--no-sandbox` is also passed, in which case cradle warns `network policy has no effect without the sandbox — pi runs with no network isolation (--sandbox to enforce it)` and nothing is enforced. nono is the enforcement authority and fails closed (bad key or unenforceable platform → refuses to start), so there is NO cradle-side network fallback. v1 honors `settings.json`'s `defaultProvider`/`defaultModel`/`defaultThinkingLevel` and passes `models.json`'s `providers` object through near-opaquely (pi is the schema authority) — the one normalization is filling pi's zero-cost default for models without a `cost`, because pi's models.json loader defaults it but `registerProvider` crashes the turn without it (`model.cost.input`, found live). `settings.json` is a pi-native file (pi owns its schema), so keys cradle doesn't map (`theme`/`quietStartup`/`collapseChangelog`/…) are silently left to pi — NOT warned as "unsupported" — with two exceptions handled instead of passed through: `packages` (pi's npm-distributed extension mechanism, e.g. `"packages": ["npm:pi-example-tool"]`) is parsed by `agent/packages.ts`'s `readPackageSpecs` (npm: sources only — `git:`/`https:`/`ssh:`/local-path sources are warned and dropped) and resolved/installed by `commands/start.ts` into a per-agent npm project, with each package's declared entry files passed as explicit `-e` flags (pi loads explicit `-e` paths even under `--no-extensions`); `npmCommand` selects the installer argv prefix cradle shells out to for that install (default `npm`). `extensions/` enumeration mirrors pi's own discovery shapes (top-level `*.ts` plus each subdir's `index.ts`).
+  - `state.ts` — per-agent runtime state lives OUTSIDE the portable folder, under `~/.cradle/agents/<basename>-<sha256(absPath)[0..8]>/` (`CRADLE_STATE_DIR` overrides the root): `extensions/` (regenerated every run), `sessions/` (never wiped), `nono-profile.json` (the generated per-agent sandbox profile, rewritten every run), and — only when the folder declares settings `packages` — `npm/` (a private npm project `commands/start.ts` installs into via `PackagesPlan`; reinstalled only when its generated `package.json` changes or `node_modules` is missing).
+  - `extensions/` — source for the generated pi extension: `providers.ts` exports the `emitProvidersExtension` string emitter (one `pi.registerProvider` per models.json provider, config baked in verbatim).
+  - `launch.ts` — pure argv composition. `composePiArgv` builds the explicit pi invocation; `composeArgv` optionally wraps it in `nono run --silent --profile <generated-profile>` by default (silent mode suppresses nono's startup banner); `--verbose` drops `--silent` to show nono's capabilities banner, and cradle prints `🔒 Sandbox Active` on silent sandboxed runs. All filesystem grants (cwd, agent dir, state dir, and the agent's `sandbox/nono.json` extras) AND the resolved network posture live INSIDE that generated profile (`nono/profiles.ts`), not as flags. nono runs by its resolved path (mise shim may not be on PATH yet); `pi` stays a bare name so nono resolves it inside the sandbox where `mise activate` works.
+- **Everything rides on argv — never env vars, never files inside `~/.pi/agent`.** The agent folder maps to pi flags: `APPEND_SYSTEM.md` → `--append-system-prompt <path>` (pi's own system-prompt-file name; the folder mirrors `~/.pi/agent`'s layout, but pi only discovers `APPEND_SYSTEM.md` in `<cwd>/.pi/` or its agent dir, so cradle passes the path explicitly); settings keys → `--provider`/`--model`/`--thinking` (always passed explicitly when the agent defines them, so personal pi defaults never bleed into model selection); `models.json` → generated `-e` extension; settings `packages` → a per-agent npm project at `<state>/npm`, installed via the folder's `npmCommand` (default `npm`) before the sandbox spawns, each package's `package.json` `pi.extensions` entries passed `-e` between the generated providers extension and the folder's own extensions; `extensions/` → `-e <file>` verbatim, ordered LAST among the `-e`s so agent extensions load with providers registered and any package-provided tools already available (custom tools live here too, via `pi.registerTool`); `skills/` → `--skill <dir>`; sessions → `--session-dir <state>/sessions`; isolation from the personal pi config → `--no-extensions --no-skills --no-prompt-templates` (explicit `-e`/`--skill` still load; `--no-context-files` is deliberately NOT passed — the target project's AGENTS.md/CLAUDE.md context is desirable). Passthrough after `--` lands last so user flags win under pi's last-wins parsing. Accepted v1 leaks: pi still reads the personal `~/.pi/agent/settings.json` (cosmetics), shares `auth.json`, and writes trust decisions to the personal `trust.json`; `--no-extensions` also disables the personal `~/.pi/agent/settings.json`'s own `packages` inside agent runs — personal `~/.pi/agent` packages still never load, distinct from the agent folder's own `packages`, which cradle resolves itself (intentional isolation). The personal `~/.pi/agent/APPEND_SYSTEM.md` and project `.pi/APPEND_SYSTEM.md` do NOT leak in: a CLI `--append-system-prompt` replaces pi's file discovery entirely (`appendSystemPromptSource ?? discoverAppendSystemPromptFile()` in pi's resource-loader).
+- **nono profile — per-agent, generated** (`src/nono/cradle-pi.json` is the embedded BASE, imported `with { type: 'json' }` by the co-located `src/nono/profiles.ts`): there is NO shared global profile in `~/.config/nono/profiles/`. Instead `profiles.ts` `buildProfileJson` (pure, unit-tested) merges the base — which `extends` the built-in `default`, adds the `node_runtime` + `git_config` + `unlink_protection` groups (git identity/config and gh auth aren't in nono's `default`; `unlink_protection` blocks deletion outside user-writable grants), read grants for mise's install/config trees and `$HOME/.config/gh` (gh CLI auth), `$HOME/.pi/agent` allow, `$HOME/.agents` read, and the macOS `say` grants — with THIS run's grants: cwd (`allow`), agent dir (`read`), state dir (`allow`), the agent's own `sandbox/nono.json` entries (`~`/`$HOME` expanded via `expandHome`), and its `unsafe_macos_seatbelt_rules` appended after the base's `unsafe_macos_seatbelt_rules` (Seatbelt is last-match-wins). `materializeStart` writes the result to `<stateDir>/nono-profile.json` on sandboxed runs; `agent/launch.ts` passes it as `nono run --profile <that file>` (nono accepts a profile by file path, and `extends`/`groups` still resolve from its registry). `meta.name` is derived per-agent from the state-dir basename (`cradle-<name>-<hash>`) so no two agents share a profile identity. The resolved `network` posture (`toNonoNetwork` maps camelCase `AgentNetwork` → nono's snake_case `network` keys) is emitted as the profile's `network` block when present (absent ⇒ no block ⇒ nono default open); nono enforces it and fails closed on a bad key — no `--block-net` flag. Keep `allow` paths tight: nono refuses to start if a grant overlaps its protected state root (`~/.local/state/nono`), so never grant `/Users` or `~/`. Each agent's sandbox posture is thus fully described by its own directory (base + `sandbox/nono.json`) — the `--dry-run` write plan shows the profile path, and the composed command is a single `--profile` line.
+- **`src/setup/`**: platform-independent fs/text helpers, all unit-tested. `install.ts` = idempotent tree writes (`installTree` is what `commands/start.ts` uses to materialize generated extensions); `utils.ts` = small helpers (`isRecord`/`parseJson`/`quoteCommandPart`/error helpers). The macOS dev-environment orchestration (`dev-env.ts`/`env.ts`, brew casks + mise toolchain) that once lived here was removed along with the `setup` command.
+- **Embedded resources**: assets co-located with their consumers and inlined into the bundle at build time via import attributes, so they survive `bun --compile` and the ESM bundle with no sidecar files or runtime path resolution. JSON assets import their parsed content (`nono/cradle-pi.json` via `with { type: 'json' }` — the base that `nono/profiles.ts` merges per-agent grants into and re-serializes per run).
+- **Testability split**: every module except `util/proc.ts` (real `Bun.spawn`) and `cli.ts` (Yargs wiring) is pure/dependency-injected and unit-tested in-process. Those two are exercised only via the subprocess smoke tests in `src/index.test.ts` — keep new spawn/wiring logic thin and out of the in-process import graph. `commands/start.ts` splits into `planStart` (composition, injectable `which`/`cwd`/`home` — builds the profile content via pure `buildProfileJson`) and `materializeStart` (real fs against temp dirs in tests; writes the generated extensions + `nono-profile.json` under the `CRADLE_STATE_DIR`-controlled state dir, so tests never touch a real global path).
+- **Package name**: `@coryrylan/cradle`. **Bin name**: `cradle` (what users type). Don't conflate the two.
+- **Module system**: ES modules (`type: "module"`). Relative imports use `.js` extensions even for `.ts` sources (standard ESM/TS convention).
+- **Task runner**: [Wireit](https://github.com/google/wireit) wraps every npm script for dependency tracking and caching — always invoke via `bun run <script>`, not directly.
+- **Lint**: ESLint runs per-package (`bun run lint`). [Knip](https://knip.dev) is configured at the monorepo root (`knip.config.js`, note `ignore: ['examples/**']` and `ignoreExportsUsedInFile`) and runs across all workspaces via `bun run lint:knip` from the repo root.
+
+## Common Commands
+
+Run from `projects/cli/` (wireit-wrapped scripts must run inside the package — bun's `--filter` runner is not wireit-compatible):
+
+```bash
+bun install                  # Install deps (resolves at workspace root)
+bun start                    # Run the CLI (via wireit: `bun src/index.ts`)
+bun src/index.ts <args>      # Run CLI directly with args
+bun run lint                 # ESLint (typescript-eslint strict) for this package
+bun run test                 # Run all tests
+bun run test:coverage        # Run tests with coverage; enforces thresholds from bunfig.toml
+bun test src/agent/folder.test.ts    # Run a single test file (bypass wireit)
+bun test -t "pattern"        # Run tests matching a name pattern
+bun run build                # Full build (ESM + .d.ts + 5 platform binaries)
+bun run ci                   # lint + build + test:coverage
+bun run ci:nocache           # Clean dist/ then run ci (useful when debugging cache issues)
+bun run install:local        # Build + install binary to ~/.local/bin/cradle
+bun run uninstall:local      # Remove ~/.local/bin/cradle
+```
+
+### Coverage thresholds (bunfig.toml)
+
+- 90% lines, 90% statements, 90% functions
+- `dist/**` excluded from coverage
+
+### Build outputs (in `dist/`)
+
+- `index.js` — minified ESM bundle
+- `index.d.ts` — type declarations (via `tsconfig.types.json`)
+- `cradle-macos-arm64`, `cradle-macos-x64`, `cradle-linux-x64`, `cradle-linux-arm64`, `cradle-windows-x64.exe` — standalone binaries (no Bun required to run)
+
+## Releases (semantic-release)
+
+Releases run automatically on push to `main` via `.github/workflows/release.yml` and are **scope-gated**:
+
+- Only commits with scope `(cli)` trigger a release
+- `feat(cli): …` → minor, `fix(cli): …` → patch, `<type>(cli)!: …` or breaking footer → major
+- `chore(…)` never releases, regardless of scope
+- Release notes filter to `(cli)`-scoped commits only
+- Tag format: `cradle-v<version>` — the unscoped name, not plain `v<version>`
+- Publishes `@coryrylan/cradle` to npm (`npm publish --provenance --access=public` on the packed tarball; the package ships only `dist/index.js` + `.d.ts`, no binaries). The unscoped npm name `cradle` is taken by a dormant CouchDB library
+- Platform binaries are **not** attached to the GitHub release — they deploy statically with the docs site (`@coryrylan/cradle-docs`'s build depends on this package's build and copies `install.sh` + `dist/cradle-*` into its output via `copy-cli-assets.js`), and the primary documented install is `curl -fsSL https://coryrylan.github.io/cradle/install.sh | bash`; npm is the alternative. `package.json#repository` must keep matching the repo the release workflow runs in (`coryrylan/cradle`) or `npm publish --provenance` fails its repository check
+- The release config lives at the monorepo root (`/release.config.js`); this package's `release.config.js` is a one-line re-export.
+
+## Commit Conventions
+
+Enforced by commitlint (`@commitlint/config-conventional`) at the monorepo root:
+
+- **Types**: `chore`, `feat`, `fix`
+- **Scopes**: `ci`, `cli`, `docs`
+- Subject: lower-case, no trailing period, max 100 chars
+
+## Adding a new CLI command
+
+Add to `src/cli.ts` using the Yargs builder pattern already there:
+
+```typescript
+cli.command(
+  'name [arg]',
+  'description',
+  yargs => yargs.positional('arg', { type: 'string', describe: '...' }).option('flag', { alias: 'f', type: 'boolean' }),
+  argv => {
+    /* implementation */
+  }
+);
+```
+
+The default command (`'$0'`) prints help via `cli.getHelp()` — keep it last-wins-safe when adding commands.
+
+Keep the Yargs handler in `cli.ts` thin: build a plain options object and delegate to a `runX(opts)`/`planX(opts)` function under `src/commands/`. Those delegate functions take their side effects (PATH lookups via `util/which.ts`, filesystem writes, spawning) as injectable deps so they can be unit-tested in-process without touching the real environment.

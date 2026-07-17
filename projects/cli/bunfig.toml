@@ -1,0 +1,4 @@
+[test]
+# To require 90% line-level and function-level coverage
+coverageThreshold = { lines = 0.9, statements = 0.9, functions = 0.9 }
+coveragePathIgnorePatterns = ["**/dist/**"]

@@ -1,0 +1,65 @@
+{
+  "name": "@coryrylan/cradle-docs",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "eleventy --serve --port=8082",
+    "build": "wireit",
+    "lint": "wireit",
+    "lint:fix": "eslint -c ./eslint.config.js --fix",
+    "ci": "wireit",
+    "clean": "rm -rf dist .eslintcache"
+  },
+  "wireit": {
+    "build": {
+      "command": "eleventy && bun copy-cli-assets.js",
+      "dependencies": [
+        "../cli:build"
+      ],
+      "files": [
+        "src/**",
+        "eleventy.config.js",
+        "copy-cli-assets.js",
+        "package.json"
+      ],
+      "output": [
+        "dist/**"
+      ],
+      "env": {
+        "PAGES_BASE_URL": {
+          "external": true
+        }
+      }
+    },
+    "lint": {
+      "command": "eslint -c ./eslint.config.js --color --cache --cache-location .eslintcache/",
+      "files": [
+        "src/**",
+        "eleventy.config.js",
+        "eslint.config.js",
+        "package.json"
+      ],
+      "output": []
+    },
+    "ci": {
+      "dependencies": [
+        "lint",
+        "build"
+      ]
+    }
+  },
+  "dependencies": {
+    "@nvidia-elements/code": "2.0.1",
+    "@nvidia-elements/core": "2.0.4",
+    "@nvidia-elements/styles": "2.0.2",
+    "@nvidia-elements/themes": "2.0.0"
+  },
+  "devDependencies": {
+    "@11ty/eleventy": "3.1.6",
+    "@11ty/eleventy-plugin-vite": "8.0.0",
+    "@nvidia-elements/lint": "2.0.1",
+    "eslint": "catalog:",
+    "markdown-it": "14.3.0"
+  }
+}

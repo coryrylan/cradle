@@ -1,0 +1,59 @@
+@import '@nvidia-elements/themes/fonts/inter.css';
+@import '@nvidia-elements/themes/index.css';
+@import '@nvidia-elements/themes/dark.css';
+@import '@nvidia-elements/styles/layout.css';
+@import '@nvidia-elements/styles/typography.css';
+@import '@nvidia-elements/styles/view-transitions.css';
+
+:root {
+  --nve-sys-layer-canvas-background: oklch(2% 0.01 270);
+  --nve-sys-layer-container-background: oklch(4% 0.01 270);
+  --nve-sys-interaction-background: oklch(14% 0.01 270);
+}
+
+main :is(h1) {
+  padding-block: 0 12px;
+}
+
+main :is(h2, h3, h4) {
+  padding-block: 36px 12px;
+}
+
+main {
+  min-height: fit-content;
+  max-inline-size: 90ch;
+  margin: var(--nve-ref-space-lg) auto;
+
+  h1 + h2 {
+    padding-block: 0 24px;
+  }
+}
+
+[nve-text='code'] {
+  padding: 0 !important;
+}
+
+nve-codeblock {
+  min-height: fit-content;
+  --padding: 24px;
+  --background: transparent;
+  --border: var(--nve-ref-border-width-sm) solid var(--nve-ref-border-color-muted);
+}
+
+.nav-drawer-toggle {
+  display: none;
+}
+
+@media (max-width: 719px) {
+  main {
+    margin: 0 auto;
+  }
+
+  .nav-page-panel {
+    display: none;
+  }
+
+  .nav-drawer-toggle {
+    display: inline-flex;
+  }
+}

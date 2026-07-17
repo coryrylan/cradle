@@ -1,0 +1,24 @@
+{
+  "extends": "default",
+  "meta": {
+    "name": "cradle-pi"
+  },
+  "groups": {
+    "include": ["node_runtime", "git_config", "unlink_protection"]
+  },
+  "filesystem": {
+    "read": [
+      "$HOME/.agents",
+      "$HOME/.local/share/mise",
+      "$HOME/.config/mise",
+      "$HOME/.config/gh",
+      "/System/iOSSupport/System/Library/ExtensionKit/Extensions",
+      "/System/Library/AssetsV2/com_apple_MobileAsset_TTSAXResourceModelAssets",
+      "/System/Library/AssetsV2/com_apple_MobileAsset_UAF_Siri_TextToSpeech"
+    ],
+    "allow": ["$HOME/.pi/agent"]
+  },
+  "unsafe_macos_seatbelt_rules": [
+    "(allow user-preference-read (preference-domain \"kCFPreferencesAnyApplication\") (preference-domain \"com.apple.speech.voice.prefs\") (preference-domain \"com.apple.speakselection\") (preference-domain \"com.apple.assistant.backedup\") (preference-domain \"com.apple.assistant.support\") (preference-domain \"com.apple.accessibility\"))"
+  ]
+}

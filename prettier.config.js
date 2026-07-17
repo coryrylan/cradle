@@ -1,0 +1,8 @@
+export default {
+  printWidth: 120,
+  singleQuote: true,
+  bracketSameLine: true,
+  singleAttributePerLine: false,
+  trailingComma: 'none',
+  arrowParens: 'avoid'
+};

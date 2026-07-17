@@ -1,0 +1,6 @@
+{
+  "filesystem": {
+    "allow": ["~/.agent-browser"]
+  },
+  "unsafe_macos_seatbelt_rules": ["(allow mach-register)", "(allow iokit-open)"]
+}
