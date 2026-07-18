@@ -22,7 +22,7 @@ The agent's role, instructions, and personality in Markdown — pi's system-prom
 
 ## settings.json
 
-pi's native settings shape. cradle honors the model-selection keys and leaves the rest to pi:
+pi's native settings shape. cradle honors the model-selection keys:
 
 ```json
 {
@@ -34,6 +34,8 @@ pi's native settings shape. cradle honors the model-selection keys and leaves th
 
 These are passed explicitly as `--provider`/`--model`/`--thinking`, so your machine's personal pi defaults never bleed into an agent run.
 
+Keys cradle doesn't map (`theme`, `quietStartup`, `collapseChangelog`, …) have no effect in an agent folder — pi reads them from `~/.pi/agent/settings.json` or the project's `.pi/settings.json`, never from the folder, and cradle warns at start so they don't silently disappear.
+
 `settings.json` also supports pi's npm-distributed extension mechanism:
 
 ```json
@@ -44,6 +46,8 @@ These are passed explicitly as `--provider`/`--model`/`--thinking`, so your mach
 ```
 
 Only `npm:<name>[@<version>]` sources are supported — cradle installs each declared package into a private npm project under the agent's state dir before the sandbox spawns, then resolves the installed package's `pi.extensions` entries into explicit `-e` flags. Other pi source forms (`git:`, `https://`, `ssh://`, local paths) are warned and dropped.
+
+`npmCommand` selects the installer, and must be a single-element array naming one of `npm`, `pnpm`, `yarn`, or `bun` — a bare command name, no paths, no flags, no extra argv. The install runs on the host before the sandbox spawns, so a wider shape would let a folder's settings.json run arbitrary host commands; anything else is warned and dropped, falling back to `npm`.
 
 ## models.json
 

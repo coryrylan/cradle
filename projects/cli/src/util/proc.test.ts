@@ -32,6 +32,21 @@ describe('runForeground', () => {
     await runForeground(['true']);
     expect(process.listenerCount('SIGINT') + process.listenerCount('SIGTERM')).toBe(baseline);
   });
+
+  it('overrides the inherited env with the given entries', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cradle-runforeground-env-'));
+    try {
+      const outFile = join(dir, 'out.txt');
+      process.env['CRADLE_RUNFOREGROUND_TEST'] = 'inherited';
+      await runForeground(['sh', '-c', `echo $CRADLE_RUNFOREGROUND_TEST > ${outFile}`], {
+        CRADLE_RUNFOREGROUND_TEST: 'overridden'
+      });
+      expect((await readFile(outFile, 'utf8')).trim()).toBe('overridden');
+    } finally {
+      delete process.env['CRADLE_RUNFOREGROUND_TEST'];
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('runInstall', () => {

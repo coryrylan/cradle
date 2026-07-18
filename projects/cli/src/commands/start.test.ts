@@ -45,6 +45,7 @@ describe('planStart', () => {
     expect(composeArgv(plan.launch).slice(0, 5)).toEqual(['/shims/nono', 'run', '--silent', '--profile', profilePath]);
     expect(plan.extensionsDir).toBe(join(stateDir, 'extensions'));
     expect(plan.sessionsDir).toBe(join(stateDir, 'sessions'));
+    expect(plan.launch.miseCacheDir).toBe(join(stateDir, 'mise-cache'));
     expect(relFiles(plan)).toEqual([]);
     expect(plan.profile?.path).toBe(profilePath);
     expect(JSON.parse(plan.profile?.content ?? '{}').extends).toBe('default');
@@ -54,7 +55,7 @@ describe('planStart', () => {
   it('should run unsandboxed and warn when sandbox/nono.json is absent', async () => {
     await rm(join(agentDir, 'sandbox'), { recursive: true });
     const plan = await planStart({ dir: agentDir }, { ...deps, which: createWhichStub({ pi: '/shims/pi' }) });
-    expect(composeArgv(plan.launch)[0]).toBe('pi');
+    expect(composeArgv(plan.launch)[0]).toBe('/shims/pi');
     expect(plan.profile).toBeNull();
     expect(plan.warnings.join('\n')).toContain('sandbox/nono.json not found');
   });
@@ -86,10 +87,25 @@ describe('planStart', () => {
   it('should not require nono when unsandboxed', async () => {
     const which = createWhichStub({ pi: '/shims/pi' });
     const plan = await planStart({ dir: agentDir, noSandbox: true }, { ...deps, which });
-    expect(composeArgv(plan.launch)[0]).toBe('pi');
+    expect(composeArgv(plan.launch)[0]).toBe('/shims/pi');
     expect(composeArgv(plan.launch)).not.toContain('nono');
     // No sandbox → no nono profile to generate.
     expect(plan.profile).toBeNull();
+  });
+
+  it('should spawn the resolved pi path (mise-shim fallback included) instead of the bare name, sandboxed and unsandboxed', async () => {
+    const shimPi = '/home/u/.local/share/mise/shims/pi';
+    const sandboxed = await planStart(
+      { dir: agentDir },
+      { ...deps, which: createWhichStub({ nono: '/shims/nono', pi: shimPi }) }
+    );
+    const sandboxedArgv = composeArgv(sandboxed.launch);
+    expect(sandboxedArgv[sandboxedArgv.indexOf('--') + 1]).toBe(shimPi);
+    const unsandboxed = await planStart(
+      { dir: agentDir, noSandbox: true },
+      { ...deps, which: createWhichStub({ pi: shimPi }) }
+    );
+    expect(composeArgv(unsandboxed.launch)[0]).toBe(shimPi);
   });
 
   it('should emit the providers extension only when the agent defines models.json', async () => {
@@ -132,6 +148,25 @@ describe('planStart', () => {
     // --offline overrides everything.
     const offline = await planStart({ dir: agentDir, offline: true, allowHost: ['api.z.ai'] }, deps);
     expect(profileNetwork(offline)).toEqual({ block: true });
+  });
+
+  it('should trim leading/trailing whitespace from --allow-host entries', async () => {
+    const plan = await planStart({ dir: agentDir, allowHost: [' api.example.com ', 'localhost'] }, deps);
+    expect(profileNetwork(plan)).toEqual({ allow_domain: ['api.example.com', 'localhost'] });
+    expect(plan.warnings.join('\n')).not.toContain('--allow-host');
+  });
+
+  it('should drop a whitespace-only --allow-host entry and warn', async () => {
+    const plan = await planStart({ dir: agentDir, allowHost: ['api.example.com', '   '] }, deps);
+    expect(profileNetwork(plan)).toEqual({ allow_domain: ['api.example.com'] });
+    expect(plan.warnings.join('\n')).toContain('--allow-host entries must be non-empty — blanks ignored');
+  });
+
+  it('should fall back to the folder network when every --allow-host entry is blank', async () => {
+    await addFile('sandbox/nono.json', JSON.stringify({ network: { allow_domain: ['folder.example'] } }));
+    const plan = await planStart({ dir: agentDir, allowHost: ['   '] }, deps);
+    expect(profileNetwork(plan)).toEqual({ allow_domain: ['folder.example'] });
+    expect(plan.warnings.join('\n')).toContain('--allow-host entries must be non-empty — blanks ignored');
   });
 
   it('should bake the network posture into the profile, disclosed by nono not cradle', async () => {
@@ -190,7 +225,7 @@ describe('planStart', () => {
     // Only pi on PATH — nono must not be required when the folder opts out.
     const which = createWhichStub({ pi: '/shims/pi' });
     const plan = await planStart({ dir: agentDir }, { ...deps, which });
-    expect(composeArgv(plan.launch)[0]).toBe('pi');
+    expect(composeArgv(plan.launch)[0]).toBe('/shims/pi');
     expect(plan.profile).toBeNull();
     expect(plan.warnings.join('\n')).toContain('sandbox disabled by sandbox/nono.json');
   });
@@ -209,7 +244,7 @@ describe('planStart', () => {
     await addFile('sandbox/nono.json', JSON.stringify({ sandbox: false }));
     const which = createWhichStub({ pi: '/shims/pi' });
     const plan = await planStart({ dir: agentDir, noSandbox: true }, { ...deps, which });
-    expect(composeArgv(plan.launch)[0]).toBe('pi');
+    expect(composeArgv(plan.launch)[0]).toBe('/shims/pi');
     expect(plan.warnings.join('\n')).not.toContain('sandbox disabled');
   });
 
@@ -249,7 +284,7 @@ describe('planStart', () => {
   it('should stay unsandboxed and warn with the new message when --no-sandbox overrides --offline', async () => {
     const which = createWhichStub({ pi: '/shims/pi' });
     const plan = await planStart({ dir: agentDir, noSandbox: true, offline: true }, { ...deps, which });
-    expect(composeArgv(plan.launch)[0]).toBe('pi');
+    expect(composeArgv(plan.launch)[0]).toBe('/shims/pi');
     expect(plan.warnings.join('\n')).toContain('network policy has no effect without the sandbox');
   });
 
@@ -270,7 +305,7 @@ describe('planStart', () => {
     const stateDir = stateDirFor(agentDir, '/home/u');
     expect(plan.packages?.npmDir).toBe(join(stateDir, 'npm'));
     expect(plan.packages?.specs).toEqual([{ name: 'pi-example-tool', version: '0.13.0' }]);
-    expect(plan.packages?.installCommand).toEqual(['npm', 'install']);
+    expect(plan.packages?.installCommand).toEqual(['npm', 'install', '--ignore-scripts']);
     expect(JSON.parse(plan.packages?.manifest ?? '{}').dependencies).toEqual({ 'pi-example-tool': '0.13.0' });
     // The dry-run argv preview never includes package -e entries; they resolve at install time.
     expect(composeArgv(plan.launch).join(' ')).not.toContain('pi-example-tool');
@@ -279,7 +314,13 @@ describe('planStart', () => {
   it('should honor the folder npmCommand as the installer prefix', async () => {
     await addFile('settings.json', JSON.stringify({ packages: ['npm:pi-example-tool'], npmCommand: ['pnpm'] }));
     const plan = await planStart({ dir: agentDir }, deps);
-    expect(plan.packages?.installCommand).toEqual(['pnpm', 'install']);
+    expect(plan.packages?.installCommand).toEqual(['pnpm', 'install', '--ignore-scripts']);
+  });
+
+  it('should append --ignore-scripts to the composed install command so a folder-declared package cannot run postinstall scripts on the host', async () => {
+    await addFile('settings.json', JSON.stringify({ packages: ['npm:pi-example-tool'] }));
+    const plan = await planStart({ dir: agentDir }, deps);
+    expect(plan.packages?.installCommand.slice(-2)).toEqual(['install', '--ignore-scripts']);
   });
 });
 
@@ -337,7 +378,7 @@ describe('materializeStart packages', () => {
       await addInstalledPackage(npmDir, 'pi-example-tool');
     };
     const result = await materializeStart(plan, { install });
-    expect(calls).toEqual([{ command: ['npm', 'install'], cwd: npmDir }]);
+    expect(calls).toEqual([{ command: ['npm', 'install', '--ignore-scripts'], cwd: npmDir }]);
     const entry = join(npmDir, 'node_modules', 'pi-example-tool', 'index.ts');
     expect(result.argv).toContain(entry);
     expect(result.argv.indexOf(entry)).toBeGreaterThan(result.argv.indexOf(join(plan.extensionsDir, 'providers.ts')));
@@ -505,5 +546,94 @@ describe('materializeStart', () => {
     await expect(materializeStart({ ...plan, extensionsDir: join(blocker, 'extensions') })).rejects.toThrow(
       'failed to write agent extensions'
     );
+  });
+
+  it('should keep the composed argv consistent with an overridden plan.extensionsDir/sessionsDir', async () => {
+    await addFile('models.json', JSON.stringify({ providers: { ollama: { baseUrl: 'http://x/v1' } } }));
+    const plan = await planStart({ dir: agentDir }, deps);
+    const overriddenExtensionsDir = join(root, 'custom-extensions');
+    const overriddenSessionsDir = join(root, 'custom-sessions');
+    const overridden = { ...plan, extensionsDir: overriddenExtensionsDir, sessionsDir: overriddenSessionsDir };
+    const result = await materializeStart(overridden);
+    // Files land in the overridden dirs (materializeStart writes to plan.extensionsDir directly)...
+    expect(await readdir(overriddenExtensionsDir)).toEqual(['providers.ts']);
+    // ...and the composed argv agrees, rather than pointing at the plan's original dirs.
+    expect(result.argv).toContain(join(overriddenExtensionsDir, 'providers.ts'));
+    expect(result.argv[result.argv.indexOf('--session-dir') + 1]).toBe(overriddenSessionsDir);
+    expect(result.argv).not.toContain(join(plan.extensionsDir, 'providers.ts'));
+    expect(result.argv).not.toContain(plan.sessionsDir);
+  });
+});
+
+describe('planStart sandbox cwd guard', () => {
+  it('should refuse to sandbox from the home directory with a friendly error naming the path', async () => {
+    await expect(planStart({ dir: agentDir }, { ...deps, cwd: '/home/u', home: '/home/u' })).rejects.toThrow(
+      'cannot sandbox from /home/u'
+    );
+  });
+
+  it('should refuse to sandbox from an ancestor of the home directory (e.g. /Users)', async () => {
+    await expect(planStart({ dir: agentDir }, { ...deps, cwd: '/home', home: '/home/u' })).rejects.toThrow(
+      'cannot sandbox from /home'
+    );
+  });
+
+  it('should refuse to sandbox from a directory that itself contains nono’s protected state root', async () => {
+    await expect(planStart({ dir: agentDir }, { ...deps, cwd: '/home/u/.local', home: '/home/u' })).rejects.toThrow(
+      'cannot sandbox from /home/u/.local'
+    );
+  });
+
+  it('should leave a normal project cwd unaffected', async () => {
+    const plan = await planStart({ dir: agentDir }, deps); // deps.cwd = '/work', deps.home = '/home/u'
+    expect(plan.profile).not.toBeNull();
+  });
+
+  it('should not apply the guard to an unsandboxed run from the home directory', async () => {
+    const which = createWhichStub({ pi: '/shims/pi' });
+    const plan = await planStart(
+      { dir: agentDir, noSandbox: true },
+      { ...deps, which, cwd: '/home/u', home: '/home/u' }
+    );
+    expect(plan.profile).toBeNull();
+    expect(composeArgv(plan.launch)[0]).toBe('/shims/pi');
+  });
+});
+
+describe('planStart linked git dir', () => {
+  let cwdRoot: string;
+  beforeEach(async () => {
+    cwdRoot = await mkdtemp(join(tmpdir(), 'cradle-linked-git-cwd-'));
+  });
+  afterEach(async () => {
+    await rm(cwdRoot, { recursive: true, force: true });
+  });
+
+  it('should grant the resolved main git dir when cwd is a linked worktree, and skip the resolve entirely when unsandboxed', async () => {
+    const worktreeCwd = join(cwdRoot, 'wt');
+    const mainGitDir = join(cwdRoot, 'main', '.git');
+    const worktreeGitDir = join(mainGitDir, 'worktrees', 'wt');
+    await mkdir(worktreeCwd, { recursive: true });
+    await mkdir(worktreeGitDir, { recursive: true });
+    await writeFile(join(worktreeGitDir, 'commondir'), '../..\n', 'utf8');
+    await writeFile(join(worktreeCwd, '.git'), `gitdir: ${worktreeGitDir}\n`, 'utf8');
+
+    const plan = await planStart({ dir: agentDir }, { ...deps, cwd: worktreeCwd });
+    expect(JSON.parse(plan.profile?.content ?? '{}').filesystem.allow).toContain(mainGitDir);
+
+    // Unsandboxed runs generate no profile — the linked-git-dir resolve never mattered.
+    const bare = await planStart(
+      { dir: agentDir, noSandbox: true },
+      { ...deps, which: createWhichStub({ pi: '/shims/pi' }), cwd: worktreeCwd }
+    );
+    expect(bare.profile).toBeNull();
+  });
+
+  it('should grant only cwd + state dir + base entries when cwd has no linked git dir', async () => {
+    const plainCwd = join(cwdRoot, 'plain');
+    await mkdir(plainCwd, { recursive: true });
+    const stateDir = stateDirFor(agentDir, '/home/u');
+    const plan = await planStart({ dir: agentDir }, { ...deps, cwd: plainCwd });
+    expect(JSON.parse(plan.profile?.content ?? '{}').filesystem.allow).toEqual(['$HOME/.pi/agent', plainCwd, stateDir]);
   });
 });

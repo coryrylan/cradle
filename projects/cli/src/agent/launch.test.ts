@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 
 import type { AgentFolder } from './folder.js';
-import { composeArgv, composePiArgv, type LaunchSpec } from './launch.js';
+import { composeArgv, composeEnv, composePiArgv, type LaunchSpec } from './launch.js';
 
 function createFolder(overrides: Partial<AgentFolder> = {}): AgentFolder {
   return {
@@ -25,10 +25,13 @@ function createSpec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
   return {
     folder: createFolder(),
     stateDir: '/state/helper',
-    emitted: { providers: null },
+    extensionsDir: '/state/helper/extensions',
+    sessionsDir: '/state/helper/sessions',
+    miseCacheDir: '/state/helper/mise-cache',
     sandbox: false,
     passthrough: [],
     nonoBin: 'nono',
+    piBin: 'pi',
     profilePath: '/state/helper/nono-profile.json',
     ...overrides
   };
@@ -40,11 +43,9 @@ describe('composePiArgv', () => {
       folder: createFolder({
         settings: { defaultProvider: 'ollama', defaultModel: 'qwen', defaultThinkingLevel: 'low' },
         skillsDir: '/agents/helper/skills',
-        extensionFiles: ['/agents/helper/extensions/flip.ts', '/agents/helper/extensions/hooks/index.ts']
+        extensionFiles: ['/agents/helper/extensions/flip.ts', '/agents/helper/extensions/hooks/index.ts'],
+        providersJson: '/agents/helper/models.json'
       }),
-      emitted: {
-        providers: '/state/helper/extensions/providers.ts'
-      },
       sandbox: true,
       passthrough: ['-p', 'hi']
     });
@@ -77,18 +78,18 @@ describe('composePiArgv', () => {
   });
 
   it('should pass agent extensions as -e after the generated providers extension, sandboxed or not', () => {
-    const folder = createFolder({ extensionFiles: ['/agents/helper/extensions/flip.ts'] });
+    const extensionFiles = ['/agents/helper/extensions/flip.ts'];
     const sandboxed = composePiArgv(
       createSpec({
-        folder,
+        folder: createFolder({ extensionFiles, providersJson: '/agents/helper/models.json' }),
         sandbox: true,
-        emitted: { providers: '/ext/providers.ts' }
+        extensionsDir: '/ext'
       })
     );
     expect(sandboxed.indexOf('/agents/helper/extensions/flip.ts')).toBeGreaterThan(
       sandboxed.indexOf('/ext/providers.ts')
     );
-    const bare = composePiArgv(createSpec({ folder, sandbox: false }));
+    const bare = composePiArgv(createSpec({ folder: createFolder({ extensionFiles }), sandbox: false }));
     expect(bare[bare.indexOf('-e') + 1]).toBe('/agents/helper/extensions/flip.ts');
   });
 
@@ -106,12 +107,18 @@ describe('composePiArgv', () => {
   });
 
   it('should place the generated providers extension as the first -e when present', () => {
-    const argv = composePiArgv(createSpec({ sandbox: true, emitted: { providers: '/ext/providers.ts' } }));
+    const argv = composePiArgv(
+      createSpec({
+        folder: createFolder({ providersJson: '/agents/helper/models.json' }),
+        sandbox: true,
+        extensionsDir: '/ext'
+      })
+    );
     expect(argv[argv.indexOf('-e') + 1]).toBe('/ext/providers.ts');
   });
 
   it('should add no -e flags when no providers, packages, or agent extensions are present', () => {
-    const argv = composePiArgv(createSpec({ sandbox: false, emitted: { providers: null } }));
+    const argv = composePiArgv(createSpec({ sandbox: false }));
     expect(argv).not.toContain('-e');
   });
 
@@ -121,12 +128,15 @@ describe('composePiArgv', () => {
   });
 
   it('should place package entries after the generated providers and before the folder extensions', () => {
-    const folder = createFolder({ extensionFiles: ['/agents/helper/extensions/flip.ts'] });
+    const folder = createFolder({
+      extensionFiles: ['/agents/helper/extensions/flip.ts'],
+      providersJson: '/agents/helper/models.json'
+    });
     const argv = composePiArgv(
       createSpec({
         folder,
         sandbox: true,
-        emitted: { providers: '/ext/providers.ts' },
+        extensionsDir: '/ext',
         packageEntries: ['/state/helper/npm/node_modules/pi-example-tool/index.ts']
       })
     );
@@ -148,6 +158,26 @@ describe('composePiArgv', () => {
 
   it('should add no -e flags for an empty packageEntries array', () => {
     expect(composePiArgv(createSpec({ packageEntries: [] }))).toEqual(composePiArgv(createSpec()));
+  });
+
+  it('should spawn the resolved pi path (mise-shim fallback included), not a bare name', () => {
+    const argv = composePiArgv(createSpec({ piBin: '/home/u/.local/share/mise/shims/pi' }));
+    expect(argv[0]).toBe('/home/u/.local/share/mise/shims/pi');
+  });
+
+  it('should derive the providers -e path and --session-dir from the spec, never re-derive from stateDir', () => {
+    // stateDir stays the default ('/state/helper'), but extensionsDir/sessionsDir are
+    // overridden — proves composePiArgv trusts the spec's own fields instead of
+    // recomputing statePaths(spec.stateDir), which would disagree here.
+    const argv = composePiArgv(
+      createSpec({
+        folder: createFolder({ providersJson: '/agents/helper/models.json' }),
+        extensionsDir: '/custom/extensions',
+        sessionsDir: '/custom/sessions'
+      })
+    );
+    expect(argv).toContain('/custom/extensions/providers.ts');
+    expect(argv[argv.indexOf('--session-dir') + 1]).toBe('/custom/sessions');
   });
 });
 
@@ -189,9 +219,31 @@ describe('composeArgv', () => {
     expect(argv[5]).toBe('--');
   });
 
-  it('should spawn the resolved nono path while keeping pi a bare name', () => {
-    const argv = composeArgv(createSpec({ sandbox: true, nonoBin: '/home/u/.local/share/mise/shims/nono' }));
+  it('should spawn the resolved nono and pi paths, not bare names, once both are resolved', () => {
+    const argv = composeArgv(
+      createSpec({
+        sandbox: true,
+        nonoBin: '/home/u/.local/share/mise/shims/nono',
+        piBin: '/home/u/.local/share/mise/shims/pi'
+      })
+    );
     expect(argv[0]).toBe('/home/u/.local/share/mise/shims/nono');
-    expect(argv[argv.indexOf('--') + 1]).toBe('pi');
+    expect(argv[argv.indexOf('--') + 1]).toBe('/home/u/.local/share/mise/shims/pi');
+  });
+
+  it('should use the resolved pi path for an unsandboxed spawn, not the bare name', () => {
+    const argv = composeArgv(createSpec({ sandbox: false, piBin: '/home/u/.local/share/mise/shims/pi' }));
+    expect(argv[0]).toBe('/home/u/.local/share/mise/shims/pi');
+  });
+});
+
+describe('composeEnv', () => {
+  it('should point MISE_CACHE_DIR at the spec miseCacheDir when sandboxed', () => {
+    const spec = createSpec({ sandbox: true, miseCacheDir: '/state/helper/mise-cache' });
+    expect(composeEnv(spec)).toEqual({ MISE_CACHE_DIR: '/state/helper/mise-cache' });
+  });
+
+  it('should return no env entries when unsandboxed, keeping the shared host mise cache', () => {
+    expect(composeEnv(createSpec({ sandbox: false }))).toEqual({});
   });
 });

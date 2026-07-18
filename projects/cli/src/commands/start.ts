@@ -10,10 +10,11 @@ import { dirname, join } from 'node:path';
 import { resolveAgentRef } from '../agent/aliases.js';
 import { emitProvidersExtension } from '../agent/extensions/providers.js';
 import { loadAgentFolder, type AgentFolder, type AgentNetwork } from '../agent/folder.js';
-import { composeArgv, type EmittedExtensions, type LaunchSpec } from '../agent/launch.js';
+import { composeArgv, type LaunchSpec } from '../agent/launch.js';
 import { emitPackagesManifest, resolvePackageEntries, type NpmPackageSpec } from '../agent/packages.js';
 import { stateDirFor, statePaths } from '../agent/state.js';
-import { AGENT_PROFILE_FILE, buildProfileJson } from '../nono/profiles.js';
+import { resolveLinkedGitDir } from '../nono/linked-git-dir.js';
+import { AGENT_PROFILE_FILE, buildProfileJson, findDegenerateSandboxCwd } from '../nono/profiles.js';
 import { installTree, readTextIfExists, type InstallContext, type TreeFile } from '../setup/install.js';
 import { requireBin, type WhichFn } from '../util/which.js';
 
@@ -48,13 +49,27 @@ export interface PackagesPlan {
   /** `emitPackagesManifest` output — the package.json cradle writes into `npmDir`. */
   readonly manifest: string;
   readonly specs: readonly NpmPackageSpec[];
-  /** `[...(settings.npmCommand ?? ['npm']), 'install']`. */
+  /**
+   * `[...(settings.npmCommand ?? ['npm']), 'install', '--ignore-scripts']`.
+   * This install runs on the host, unsandboxed, before the sandbox spawns —
+   * `--ignore-scripts` stops a folder-declared package's postinstall from
+   * running arbitrary host code (`npmCommand` is validated upstream to a
+   * single-element allowlist of `npm`/`pnpm`/`yarn`/`bun`, all of which accept
+   * this flag).
+   */
   readonly installCommand: readonly string[];
 }
 
 export interface StartPlan {
   /** Generated extensions, relative to `extensionsDir`. */
   readonly files: readonly TreeFile[];
+  /**
+   * Authoritative — the single derivation site for where generated extensions
+   * and sessions live. `materializeStart` re-asserts these onto `launch`
+   * before composing the final argv, so overriding either here (as tests do)
+   * changes the composed argv accordingly instead of silently disagreeing
+   * with whatever `launch` had baked in at `planStart` time.
+   */
   readonly extensionsDir: string;
   readonly sessionsDir: string;
   readonly warnings: readonly string[];
@@ -81,7 +96,7 @@ export async function planStart(flags: StartFlags, deps: StartDeps = {}): Promis
   const { dir, warnings: refWarnings } = await resolveAgentRef(flags.dir, { home, cwd });
   const folder = await loadAgentFolder(dir);
   const stateDir = stateDirFor(folder.dir, home);
-  const { extensionsDir, sessionsDir } = statePaths(stateDir);
+  const { extensionsDir, sessionsDir, miseCacheDir } = statePaths(stateDir);
   const { sandbox, network, warnings: postureWarnings } = resolvePosture(flags, folder);
   const warnings = [...refWarnings, ...postureWarnings];
   const dryRun = flags.dryRun ?? false;
@@ -93,10 +108,19 @@ export async function planStart(flags: StartFlags, deps: StartDeps = {}): Promis
     dryRun,
     stateDir,
     extensionsDir,
+    sessionsDir,
+    miseCacheDir,
     ...(deps.which !== undefined ? { which: deps.which } : {})
   });
   const files = emitExtensionFiles(folder);
-  const profile = sandboxPlan(sandbox, folder, network, { home, cwd, stateDir, profilePath: launch.profilePath });
+  const linkedGitDir = sandbox ? await resolveLinkedGitDir(cwd) : undefined;
+  const profile = sandboxPlan(sandbox, folder, network, {
+    home,
+    cwd,
+    stateDir,
+    profilePath: launch.profilePath,
+    ...(linkedGitDir !== undefined ? { linkedGitDir } : {})
+  });
   const packages = buildPackagesPlan(folder, stateDir);
   return { files, extensionsDir, sessionsDir, warnings, profile, packages, launch, dryRun };
 }
@@ -108,24 +132,26 @@ interface LaunchContext {
   readonly dryRun: boolean;
   readonly stateDir: string;
   readonly extensionsDir: string;
+  readonly sessionsDir: string;
+  readonly miseCacheDir: string;
   readonly which?: WhichFn;
 }
 
 /** Resolve the bins, generated-extension paths, and profile path into the `LaunchSpec` `composeArgv` consumes. */
 function buildLaunch(ctx: LaunchContext): LaunchSpec {
-  const { folder, flags, sandbox, dryRun, stateDir, extensionsDir, which } = ctx;
-  const nonoBin = resolveBins(sandbox, dryRun, which);
+  const { folder, flags, sandbox, dryRun, stateDir, extensionsDir, sessionsDir, miseCacheDir, which } = ctx;
+  const { nonoBin, piBin } = resolveBins(sandbox, dryRun, which);
   const profilePath = join(stateDir, AGENT_PROFILE_FILE);
-  const emitted: EmittedExtensions = {
-    providers: folder.providersJson !== null ? join(extensionsDir, 'providers.ts') : null
-  };
   return {
     folder,
     stateDir,
-    emitted,
+    extensionsDir,
+    sessionsDir,
+    miseCacheDir,
     sandbox,
     passthrough: flags.passthrough ?? [],
     nonoBin,
+    piBin,
     profilePath,
     ...(flags.verbose ? { verbose: true } : {})
   };
@@ -139,7 +165,7 @@ function buildPackagesPlan(folder: AgentFolder, stateDir: string): PackagesPlan 
     npmDir: join(stateDir, 'npm'),
     manifest: emitPackagesManifest(specs),
     specs,
-    installCommand: [...(folder.settings.npmCommand ?? ['npm']), 'install']
+    installCommand: [...(folder.settings.npmCommand ?? ['npm']), 'install', '--ignore-scripts']
   };
 }
 
@@ -149,8 +175,13 @@ function resolvePosture(
   folder: AgentFolder
 ): { sandbox: boolean; network: AgentNetwork | undefined; warnings: readonly string[] } {
   const { sandbox, warnings } = resolveSandbox(flags, folder);
-  const network = resolveNetwork(flags, folder);
-  return { sandbox, network, warnings: withUnsandboxedNetworkWarning(sandbox, network, warnings) };
+  const networkWarnings: string[] = [];
+  const network = resolveNetwork(flags, folder, networkWarnings);
+  return {
+    sandbox,
+    network,
+    warnings: withUnsandboxedNetworkWarning(sandbox, network, [...warnings, ...networkWarnings])
+  };
 }
 
 /**
@@ -158,10 +189,23 @@ function resolvePosture(
  * `network` > open default. CLI flags REPLACE the folder network (no merge) so
  * the effective posture is always unambiguous.
  */
-function resolveNetwork(flags: StartFlags, folder: AgentFolder): AgentNetwork | undefined {
+function resolveNetwork(flags: StartFlags, folder: AgentFolder, warnings: string[]): AgentNetwork | undefined {
   if (flags.offline) return { block: true };
-  if (flags.allowHost !== undefined && flags.allowHost.length > 0) return { allowDomain: [...flags.allowHost] };
+  const allowHost = readCliHostList(flags.allowHost ?? [], warnings);
+  if (allowHost.length > 0) return { allowDomain: allowHost };
   return folder.sandbox.network;
+}
+
+/**
+ * Trim `--allow-host` entries and drop blanks — mirrors `folder.ts`'s
+ * `readHostList` (the folder-side `network.allow_domain` reader): an
+ * untrimmed host lands verbatim in the profile's `allow_domain` and never
+ * matches at proxy time.
+ */
+function readCliHostList(hosts: readonly string[], warnings: string[]): readonly string[] {
+  const trimmed = hosts.map(host => host.trim()).filter(host => host !== '');
+  if (trimmed.length !== hosts.length) warnings.push('--allow-host entries must be non-empty — blanks ignored');
+  return trimmed;
 }
 
 /** A restrictive posture (block/allowlist) needs the sandbox to mean anything; open/port-only doesn't. */
@@ -240,8 +284,14 @@ export async function materializeStart(
     await mkdir(dirname(plan.profile.path), { recursive: true });
     await writeFile(plan.profile.path, plan.profile.content, 'utf8');
   }
-  if (plan.packages === null) return { argv: composeArgv(plan.launch), warnings: [] };
-  return installAndResolvePackages(plan.packages, plan.launch, deps);
+  // `plan.extensionsDir`/`plan.sessionsDir` are authoritative (see `StartPlan`
+  // docs): re-assert them onto `launch` here so a plan whose dirs were
+  // overridden after `planStart` still gets a composed argv that agrees with
+  // what was actually written to disk above, instead of whatever `launch` had
+  // baked in at `planStart` time.
+  const launch: LaunchSpec = { ...plan.launch, extensionsDir: plan.extensionsDir, sessionsDir: plan.sessionsDir };
+  if (plan.packages === null) return { argv: composeArgv(launch), warnings: [] };
+  return installAndResolvePackages(plan.packages, launch, deps);
 }
 
 /** Skip a reinstall when the manifest is unchanged and `node_modules` already exists — npm install is not free. */
@@ -276,16 +326,25 @@ async function installAndResolvePackages(
   return { argv: composeArgv({ ...launch, packageEntries: entries }), warnings };
 }
 
+interface ResolvedBins {
+  readonly nonoBin: string;
+  readonly piBin: string;
+}
+
 /**
- * Verify the required bins and resolve nono's spawn path. `--dry-run` only
- * previews, so it deliberately skips the checks — you can compose a command
- * before pi/nono are installed.
+ * Verify the required bins and resolve their spawn paths. `pi`'s resolved path
+ * (mise-shim fallback included, see `util/which.ts`) is threaded through to
+ * `composePiArgv` unchanged so a doctor-clean, PATH-miss-but-shim-present `pi`
+ * still spawns — a bare `'pi'` string only resolves via the spawning
+ * process's own PATH, which is exactly the gap the shim fallback exists to
+ * cover. `--dry-run` only previews, so it deliberately skips the checks — you
+ * can compose a command before pi/nono are installed.
  */
-function resolveBins(sandbox: boolean, dryRun: boolean, which?: WhichFn): string {
-  if (dryRun) return 'nono';
+function resolveBins(sandbox: boolean, dryRun: boolean, which?: WhichFn): ResolvedBins {
+  if (dryRun) return { nonoBin: 'nono', piBin: 'pi' };
   const nonoBin = sandbox ? requireBin('nono', which) : 'nono';
-  requireBin('pi', which);
-  return nonoBin;
+  const piBin = requireBin('pi', which);
+  return { nonoBin, piBin };
 }
 
 /**
@@ -296,14 +355,27 @@ function resolveBins(sandbox: boolean, dryRun: boolean, which?: WhichFn): string
  * is the complete audit surface (seatbelt rules never appear in the banner
  * even with `--verbose`). Returns `null` on unsandboxed runs, which need no
  * profile.
+ *
+ * Fails fast on a degenerate cwd (see `findDegenerateSandboxCwd`) before
+ * baking it in as the profile's cwd `allow` grant: nono itself refuses to
+ * start when a grant overlaps its protected state root, and that refusal is
+ * opaque — a cradle-level error here names the offending directory instead.
  */
 function sandboxPlan(
   sandbox: boolean,
   folder: AgentFolder,
   network: AgentNetwork | undefined,
-  ctx: { home: string; cwd: string; stateDir: string; profilePath: string }
+  ctx: { home: string; cwd: string; stateDir: string; profilePath: string; linkedGitDir?: string }
 ): { path: string; content: string } | null {
   if (!sandbox) return null;
+  const degenerateCwd = findDegenerateSandboxCwd(ctx.cwd, ctx.home);
+  if (degenerateCwd !== undefined) {
+    throw new Error(
+      `cannot sandbox from ${degenerateCwd} — this directory is (or contains) nono's protected state root ` +
+        `(~/.local/state/nono) and nono refuses to start with an overlapping grant; run \`cradle start\` from a ` +
+        `project directory instead`
+    );
+  }
   const content = buildProfileJson({
     home: ctx.home,
     cwd: ctx.cwd,
@@ -311,7 +383,8 @@ function sandboxPlan(
     stateDir: ctx.stateDir,
     grants: folder.sandbox.filesystem,
     rules: folder.sandbox.unsafeMacosSeatbeltRules,
-    ...(network !== undefined ? { network } : {})
+    ...(network !== undefined ? { network } : {}),
+    ...(ctx.linkedGitDir !== undefined ? { linkedGitDir: ctx.linkedGitDir } : {})
   });
   return { path: ctx.profilePath, content };
 }

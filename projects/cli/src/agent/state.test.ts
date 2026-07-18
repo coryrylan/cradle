@@ -45,7 +45,11 @@ describe('stateDirFor', () => {
 });
 
 describe('statePaths', () => {
-  it('should place extensions and sessions inside the state dir', () => {
-    expect(statePaths('/s')).toEqual({ extensionsDir: '/s/extensions', sessionsDir: '/s/sessions' });
+  it('should place extensions, sessions, and the mise cache inside the state dir', () => {
+    expect(statePaths('/s')).toEqual({
+      extensionsDir: '/s/extensions',
+      sessionsDir: '/s/sessions',
+      miseCacheDir: '/s/mise-cache'
+    });
   });
 });

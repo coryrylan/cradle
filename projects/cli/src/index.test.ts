@@ -51,8 +51,11 @@ describe('start command', () => {
     expect(lines.some(line => line.startsWith('write: ') && line.endsWith('nono-profile.json'))).toBe(true);
     const command = lines.at(-1) ?? '';
     // The wrapper points nono at the generated per-agent profile; grants live inside it, not as flags.
-    // --silent suppresses nono's startup banner by default.
-    expect(command.startsWith('nono run --silent --profile ')).toBe(true);
+    // --silent suppresses nono's startup banner by default. The dry-run print
+    // discloses the spawn env too — cradle's one env-var exception (see
+    // `agent/launch.ts`'s `composeEnv`) — as a leading shell-assignment.
+    expect(command.startsWith('MISE_CACHE_DIR=')).toBe(true);
+    expect(command).toContain('/mise-cache nono run --silent --profile ');
     expect(command).toContain('nono-profile.json');
     expect(command).not.toContain('--allow ');
     expect(command).not.toContain('--read ');
@@ -75,7 +78,7 @@ describe('start command', () => {
     const { stdout, exitCode } = await runCli(['start', agentDir, '--dry-run', '--sandbox'], env);
     const lines = stdout.trim().split('\n');
     expect(lines.some(line => line.startsWith('write: ') && line.endsWith('nono-profile.json'))).toBe(true);
-    expect(lines.at(-1)?.startsWith('nono run --silent --profile ')).toBe(true);
+    expect(lines.at(-1)).toContain('/mise-cache nono run --silent --profile ');
     expect(exitCode).toBe(0);
   });
 
@@ -95,7 +98,8 @@ describe('start command', () => {
   it("omits --silent with --verbose to show nono's full capabilities banner", async () => {
     const { stdout, exitCode } = await runCli(['start', agentDir, '--dry-run', '--verbose'], env);
     const command = stdout.trim().split('\n').at(-1) ?? '';
-    expect(command.startsWith('nono run --profile ')).toBe(true);
+    expect(command.startsWith('MISE_CACHE_DIR=')).toBe(true);
+    expect(command).toContain('/mise-cache nono run --profile ');
     expect(command).not.toContain('--silent');
     expect(exitCode).toBe(0);
   });
@@ -119,6 +123,17 @@ describe('start command', () => {
     expect(command.endsWith('--resume')).toBe(true);
     // Network policy is disclosed by nono's startup banner, not echoed by cradle.
     expect(stdout).not.toContain('sandbox network:');
+    expect(exitCode).toBe(0);
+  });
+
+  it('forwards numeric-looking passthrough tokens after `--` to pi verbatim, not yargs-coerced', async () => {
+    const { stdout, exitCode } = await runCli(
+      ['start', agentDir, '--dry-run', '--', '--temperature', '1.10', '08', '2.0', '1e3'],
+      env
+    );
+    const command = stdout.trim().split('\n').at(-1) ?? '';
+    // Un-fixed yargs numeric coercion would turn these into 1.1, 8, 2, 1000.
+    expect(command.endsWith('--temperature 1.10 08 2.0 1e3')).toBe(true);
     expect(exitCode).toBe(0);
   });
 
@@ -203,7 +218,8 @@ describe('start command', () => {
     await writeFile(join(agentDir, 'sandbox', 'nono.json'), JSON.stringify({ sandbox: false }));
     const { stdout, exitCode } = await runCli(['start', agentDir, '--dry-run', '--sandbox'], env);
     const command = stdout.trim().split('\n').at(-1) ?? '';
-    expect(command.startsWith('nono run --silent --profile ')).toBe(true);
+    expect(command.startsWith('MISE_CACHE_DIR=')).toBe(true);
+    expect(command).toContain('/mise-cache nono run --silent --profile ');
     expect(exitCode).toBe(0);
   });
 

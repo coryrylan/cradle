@@ -85,6 +85,6 @@ cradle then runs `pi` bare and warns loudly on every run. Precedence: explicit `
 
 ## Per-agent generated profiles
 
-cradle doesn't keep a shared global nono profile. On each run it generates a per-agent profile at `~/.cradle/agents/<id>/nono-profile.json` — a conservative base merged with that run's grants: your cwd, the agent folder, the state dir, and the `sandbox/nono.json` entries above. There's no separate setup step: an agent's entire sandbox posture lives in its own directory.
+cradle doesn't keep a shared global nono profile. On each run it generates a per-agent profile at `~/.cradle/agents/<id>/nono-profile.json` — a conservative base merged with that run's grants: your cwd, the agent folder, the state dir, the linked git dir when cwd is a linked worktree or submodule checkout (otherwise every sandboxed git command fails with `fatal: not a git repository`, since the real git dir lives outside cwd), and the `sandbox/nono.json` entries above. There's no separate setup step: an agent's entire sandbox posture lives in its own directory. Sandboxed runs also get a private mise cache (`MISE_CACHE_DIR` → `~/.cradle/agents/<id>/mise-cache`) so mise works warning-free without exposing the host's shared cache.
 
 Grant paths tightly. nono refuses to start if a grant overlaps its own state root, so **never** grant `~/` or `/Users` wholesale — widen only the specific paths a tool needs (like `~/.agent-browser` above).

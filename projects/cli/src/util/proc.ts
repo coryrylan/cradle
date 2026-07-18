@@ -16,8 +16,11 @@ export function killOn(proc: Killable, signal: ForwardableSignal): () => void {
  *
  * This is the only module that performs a real spawn; everything upstream
  * (argv composition, bin resolution) is utils and unit-tested.
+ *
+ * `env` entries override the inherited `process.env` (used for the
+ * sandboxed-run `MISE_CACHE_DIR`, see `agent/launch.ts`'s `composeEnv`).
  */
-export async function runForeground(argv: readonly string[]): Promise<number> {
+export async function runForeground(argv: readonly string[], env: Record<string, string> = {}): Promise<number> {
   const [cmd, ...rest] = argv;
   if (!cmd) {
     throw new Error('runForeground requires at least one argument');
@@ -27,7 +30,7 @@ export async function runForeground(argv: readonly string[]): Promise<number> {
     stdin: 'inherit',
     stdout: 'inherit',
     stderr: 'inherit',
-    env: process.env
+    env: { ...process.env, ...env }
   });
 
   // Forward interrupts to the child while it runs, then detach — leaving the

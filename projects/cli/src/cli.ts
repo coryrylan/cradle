@@ -5,7 +5,7 @@ import { basename, join } from 'node:path';
 import yargs from 'yargs';
 
 import pkg from '../package.json' with { type: 'json' };
-import { composeArgv } from './agent/launch.js';
+import { composeArgv, composeEnv } from './agent/launch.js';
 import { doctorExitCode, formatDoctorReport, runDoctor } from './commands/doctor.js';
 import { materializeStart, planStart, type StartFlags, type StartPlan } from './commands/start.js';
 import { quoteCommandPart } from './setup/utils.js';
@@ -16,7 +16,10 @@ const cli = yargs(process.argv.slice(2))
   .scriptName('cradle')
   .version(pkg.version)
   .usage('$0 <cmd> [args]')
-  .parserConfiguration({ 'populate--': true })
+  // Both flags are required to stop yargs from numerically coercing passthrough
+  // tokens after `--` (verified empirically: 'parse-numbers' alone only covers
+  // declared/unknown *option* values, not the positional-like `--` array).
+  .parserConfiguration({ 'populate--': true, 'parse-numbers': false, 'parse-positional-numbers': false })
   .strict();
 
 cli.command(
@@ -103,7 +106,7 @@ async function runStart(flags: StartFlags): Promise<void> {
     const result = await materializeStart(plan, { install: runInstall });
     printWarnings(result.warnings);
     if (plan.profile !== null && !flags.verbose) console.log('🔒 Sandbox Active');
-    process.exit(await runForeground(result.argv));
+    process.exit(await runForeground(result.argv, composeEnv(plan.launch)));
   } catch (err) {
     reportError(err);
   }
@@ -113,7 +116,11 @@ function printDryRun(plan: StartPlan): void {
   for (const file of plan.files) console.log(`write: ${join(plan.extensionsDir, file.rel)}`);
   if (plan.profile !== null) console.log(`write: ${plan.profile.path}`);
   if (plan.packages !== null) printPackagesPlan(plan.packages);
-  console.log(composeArgv(plan.launch).map(quoteCommandPart).join(' '));
+  // The dry-run print is an audit surface, so it must disclose the spawn env
+  // too (cradle's one env-var exception, see `agent/launch.ts`'s `composeEnv`)
+  // — not just the argv.
+  const envPrefix = Object.entries(composeEnv(plan.launch)).map(([key, value]) => `${key}=${quoteCommandPart(value)}`);
+  console.log([...envPrefix, ...composeArgv(plan.launch).map(quoteCommandPart)].join(' '));
 }
 
 // Dry-run never installs; the printed argv legitimately omits the package `-e`

@@ -1,23 +1,43 @@
 // Composes the argv that runs an agent folder: an explicit `pi` invocation
 // (system prompt, generated extensions, skills, model settings, session dir),
-// optionally wrapped in `nono run`.
+// optionally wrapped in `nono run`. Also composes the spawn env — see
+// `composeEnv` for cradle's single deliberate env-var exception.
+
+import { join } from 'node:path';
 
 import type { AgentFolder } from './folder.js';
-import { statePaths } from './state.js';
-
-export interface EmittedExtensions {
-  /** Abs path of the generated providers extension, `null` when the agent has no models.json. */
-  readonly providers: string | null;
-}
 
 export interface LaunchSpec {
   readonly folder: AgentFolder;
   readonly stateDir: string;
-  readonly emitted: EmittedExtensions;
+  /**
+   * Where the generated providers extension is written (see
+   * `folder.providersJson`) and where `--session-dir` points, sourced from the
+   * plan's own `extensionsDir`/`sessionsDir` (`commands/start.ts` — the single
+   * derivation site; re-deriving from `stateDir` here risks silently
+   * disagreeing with a plan whose dirs were overridden after `planStart`).
+   */
+  readonly extensionsDir: string;
+  readonly sessionsDir: string;
+  /**
+   * Where sandboxed runs point `MISE_CACHE_DIR` (see `composeEnv`), sourced
+   * from the plan's `statePaths` derivation like `extensionsDir`/`sessionsDir`.
+   */
+  readonly miseCacheDir: string;
   readonly sandbox: boolean;
   readonly passthrough: readonly string[];
   /** Resolved path, or bare `nono` for dry-run previews. */
   readonly nonoBin: string;
+  /**
+   * Resolved path (mise-shim fallback included, see `util/which.ts`), or bare
+   * `pi` for dry-run previews. Used consistently whether or not the run is
+   * sandboxed — the generated profile already grants read on the mise install
+   * tree (see `nono/cradle-pi.json`), so the absolute path resolves inside the
+   * sandbox too; a bare `pi` only resolves on whatever PATH the spawning
+   * process happens to have, which is exactly the gap a fresh mise-only
+   * install falls into.
+   */
+  readonly piBin: string;
   /** Abs path of the generated per-agent nono profile; used only when `sandbox` is true. */
   readonly profilePath: string;
   /**
@@ -45,26 +65,56 @@ export interface LaunchSpec {
  * agent's own extensions may depend on them.
  */
 export function composePiArgv(spec: LaunchSpec): string[] {
-  const { folder, emitted } = spec;
+  const { folder } = spec;
   const { settings } = folder;
   const argv = [
-    'pi',
+    spec.piBin,
     '--append-system-prompt',
     folder.appendSystemFilePath,
     '--no-extensions',
     '--no-skills',
     '--no-prompt-templates'
   ];
-  if (emitted.providers !== null) argv.push('-e', emitted.providers);
+  if (folder.providersJson !== null) argv.push('-e', join(spec.extensionsDir, 'providers.ts'));
   for (const entry of spec.packageEntries ?? []) argv.push('-e', entry);
   for (const extension of folder.extensionFiles) argv.push('-e', extension);
   if (folder.skillsDir !== null) argv.push('--skill', folder.skillsDir);
   if (settings.defaultProvider !== undefined) argv.push('--provider', settings.defaultProvider);
   if (settings.defaultModel !== undefined) argv.push('--model', settings.defaultModel);
   if (settings.defaultThinkingLevel !== undefined) argv.push('--thinking', settings.defaultThinkingLevel);
-  argv.push('--session-dir', statePaths(spec.stateDir).sessionsDir);
+  argv.push('--session-dir', spec.sessionsDir);
   argv.push(...spec.passthrough);
   return argv;
+}
+
+/**
+ * Compose the spawn env for a sandboxed run: `{ MISE_CACHE_DIR: spec.miseCacheDir }`;
+ * `{}` when unsandboxed.
+ *
+ * The generated profile denies the shared `~/Library/Caches/mise` on purpose
+ * — a poisoned `bin_paths` cache would redirect which binaries the user's
+ * later UNSANDBOXED mise execs resolve to, invisibly and machine-globally.
+ * Without this override, every sandboxed `mise exec` spams `mise WARN failed
+ * to write cache file` because it can't write there. Pointing `MISE_CACHE_DIR`
+ * at a private cache inside the already-granted state dir instead lets mise
+ * cache writes succeed (no warnings, working cache) while the shared host
+ * cache stays untouched; mise creates the directory itself, cradle never
+ * pre-creates or wipes it. Unsandboxed runs return `{}` and keep the shared
+ * host cache — no override needed since there's no sandbox denial to work
+ * around.
+ *
+ * This deliberately overrides any user-set `MISE_CACHE_DIR` for sandboxed
+ * runs — the profile wouldn't grant a custom location either, so honoring one
+ * would just trade the warning spam for a silent cache-write failure. It is
+ * also cradle's single exception to argv-only composition (see the module
+ * header and `ARCHITECTURE.md`'s "Why argv" section): this configures mise,
+ * not pi, so it doesn't touch the argv-survives-sandboxing rationale that
+ * motivates keeping pi's own configuration on argv. The failure mode if this
+ * env var were ever stripped is benign — mise falls back to the shared cache
+ * and the warnings return, nothing breaks.
+ */
+export function composeEnv(spec: LaunchSpec): Record<string, string> {
+  return spec.sandbox ? { MISE_CACHE_DIR: spec.miseCacheDir } : {};
 }
 
 /**
@@ -79,13 +129,15 @@ export function composePiArgv(spec: LaunchSpec): string[] {
  * capabilities banner, and cradle prints `🔒 Sandbox Active` on silent runs.
  * No per-flag network posture — it all lives in the profile.
  *
- * nono runs by its resolved path (`spec.nonoBin`) because cradle spawns it
- * directly and a freshly mise-installed nono may not be on PATH yet (mise
- * shim). `pi` stays a bare name: nono execs it *inside* the sandbox, where
- * `mise activate` exposes the tool's install dir (inside the
- * `$HOME/.local/share/mise` tree the profile grants) — the mise shim would
- * route through an ungranted path. nono guarantees child processes inherit the
- * sandbox, so pi spawning its own subprocesses is covered too.
+ * Both `spec.nonoBin` and `spec.piBin` are resolved paths (mise-shim fallback
+ * included), never bare names: cradle spawns `nonoBin` directly, and a
+ * freshly mise-installed nono may not be on PATH yet; `piBin` is passed
+ * through to nono as plain argv (`-- <piBin> …`), and nono execs it *inside*
+ * the sandbox, where the resolved absolute path resolves fine against the
+ * mise install tree the base profile already grants read on (see
+ * `nono/cradle-pi.json`) — no PATH lookup needed either side of the sandbox
+ * boundary. nono guarantees child processes inherit the sandbox, so pi
+ * spawning its own subprocesses is covered too.
  */
 export function composeArgv(spec: LaunchSpec): string[] {
   const piArgv = composePiArgv(spec);

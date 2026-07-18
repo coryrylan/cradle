@@ -1,7 +1,9 @@
 // Per-agent runtime state lives outside the (portable, committable) agent
-// folder: generated pi extensions and session history go under
-// `~/.cradle/agents/<basename>-<hash>/`. The hash keys the absolute folder
-// path so two agents with the same basename never collide.
+// folder: generated pi extensions, session history, and (on sandboxed runs) a
+// private mise cache go under `~/.cradle/agents/<basename>-<hash>/`. The hash
+// keys the absolute folder path so two agents with the same basename never
+// collide. `mise-cache/` is created lazily by mise itself on sandboxed runs
+// (see `agent/launch.ts`'s `composeEnv`) — cradle never pre-creates or wipes it.
 
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -10,6 +12,7 @@ import { basename, join } from 'node:path';
 export interface StatePaths {
   readonly extensionsDir: string;
   readonly sessionsDir: string;
+  readonly miseCacheDir: string;
 }
 
 /** Stable, readable id for an agent folder: sanitized basename + 8-hex path hash. */
@@ -37,6 +40,7 @@ export function stateDirFor(
 export function statePaths(stateDir: string): StatePaths {
   return {
     extensionsDir: join(stateDir, 'extensions'),
-    sessionsDir: join(stateDir, 'sessions')
+    sessionsDir: join(stateDir, 'sessions'),
+    miseCacheDir: join(stateDir, 'mise-cache')
   };
 }

