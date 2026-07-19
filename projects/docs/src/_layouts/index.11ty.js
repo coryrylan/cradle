@@ -10,7 +10,7 @@ const NAV_ITEMS = [
 ];
 
 export function render(data) {
-  const title = data.title ?? 'cradle';
+  const title = data.title ?? '@coryrylan/cradle';
   const description = data.description ?? 'A runtime for portable agents defined as folders.';
   const currentUrl = data.page?.url ?? '/';
 
