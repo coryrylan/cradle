@@ -19,7 +19,7 @@ jobs:
       # npm publish --provenance mints its OIDC attestation token from the job
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # semantic-release resolves the previous release from tags — shallow clones see none
           fetch-depth: 0
