@@ -27,4 +27,4 @@ This file only covers how `projects/docs` wires Elements into Eleventy. For comp
 
 - Run `bun run build` in `projects/docs` after layout, renderer, or asset pipeline changes.
 - Run `bun run lint` when editing Eleventy config or layout TypeScript.
-- From the repo root, `bun --filter @coryrylan/cradle-docs run ci` runs both.
+- Run both together with `bun run ci` from inside `projects/docs` — wireit-wrapped scripts must run in the package, not via `bun --filter`.

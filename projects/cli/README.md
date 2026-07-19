@@ -53,13 +53,12 @@ bun start
 | `bun run test`            | Run tests (no coverage)                                         |
 | `bun run test:coverage`   | Run tests with coverage; enforces thresholds from `bunfig.toml` |
 | `bun run lint`            | Lint this package with ESLint (typescript-eslint strict)        |
-| `bun run format`          | Check formatting with Prettier                                  |
-| `bun run format:fix`      | Auto-fix formatting                                             |
 | `bun run ci`              | Run lint + build + test:coverage (used in CI)                   |
+| `bun run ci:nocache`      | Clean `dist/` then run `ci` (useful for cache debugging)        |
 | `bun run install:local`   | Build and install binary to `~/.local/bin`                      |
 | `bun run uninstall:local` | Remove locally installed binary                                 |
 
-> Knip (unused files / deps / exports) is configured at the monorepo root and runs across all workspaces. From the repo root, run `bun run lint:knip`.
+> Formatting (Prettier) and Knip (unused files / deps / exports) run at the monorepo root, not per-package. From the repo root: `bun run format` / `bun run format:fix` and `bun run lint:knip`.
 
 ## CLI Usage
 
