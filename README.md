@@ -2,7 +2,7 @@
 
 ![CI Build](https://github.com/coryrylan/cradle/actions/workflows/pull-request.yml/badge.svg)
 
-**A runtime for portable agents defined as folders.** An agent is a directory: an `APPEND_SYSTEM.md` plus optional model config, skills, extensions, and sandbox posture. `cradle start <dir>` reads the folder and launches the [pi](https://github.com/earendil-works/pi-mono) coding agent configured from it — wrapped in the [nono](https://github.com/always-further/nono) filesystem/network sandbox when the folder declares one. Think of cradle as a pi agent switcher: one pi install, many agents, each described entirely by its own directory.
+**A runtime for portable agents defined as folders.** An agent is a directory: a `SYSTEM.md` or `APPEND_SYSTEM.md` plus optional model config, skills, extensions, and sandbox posture. `cradle start <dir>` reads the folder and launches the [pi](https://github.com/earendil-works/pi-mono) coding agent configured from it — wrapped in the [nono](https://github.com/always-further/nono) filesystem/network sandbox when the folder declares one. Think of cradle as a pi agent switcher: one pi install, many agents, each described entirely by its own directory.
 
 The folder is static, portable, and committable; runtime state (generated extensions, session history, the generated sandbox profile) lives outside it under `~/.cradle/`. An agent folder is code — extensions run with the pi process's permissions — so treat a third-party folder like any repo you'd run.
 
@@ -34,7 +34,8 @@ Full install, dependency, and usage details are in the [CLI README](./projects/c
 
 ```
 my-agent/
-  APPEND_SYSTEM.md   required   the agent's role and instructions
+  SYSTEM.md          required*  replace pi's system prompt (role + instructions)
+  APPEND_SYSTEM.md   required*  append to pi's system prompt (role + instructions)
   settings.json      optional   pi-native settings (model selection, packages)
   models.json        optional   pi-native custom provider definitions
   skills/            optional   markdown playbooks, loaded when relevant
@@ -42,7 +43,7 @@ my-agent/
   sandbox/           optional   sandbox posture (nono.json)
 ```
 
-Every supported file uses a pi-native or cross-tool-standard name, mirroring pi's own `~/.pi/agent/` layout — anything written for a personal pi config drops in unchanged. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full folder-format spec and [`examples/`](./examples) for runnable agents:
+`*` At least one of `SYSTEM.md` (replaces pi's default prompt) / `APPEND_SYSTEM.md` (appends to it) is required; a folder may ship both. Every supported file uses a pi-native or cross-tool-standard name, mirroring pi's own `~/.pi/agent/` layout — anything written for a personal pi config drops in unchanged. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full folder-format spec and [`examples/`](./examples) for runnable agents:
 
 - [`examples/hello`](./examples/hello) — minimal agent, locked offline to a local Ollama model.
 - [`examples/browser`](./examples/browser) — [agent-browser](https://agent-browser.dev/) + Chrome for Testing running sandboxed under nono.

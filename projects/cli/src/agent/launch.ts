@@ -57,6 +57,22 @@ export interface LaunchSpec {
 }
 
 /**
+ * The system-prompt flags for a folder: `--system-prompt <SYSTEM.md>` (replaces
+ * pi's default prompt) and/or `--append-system-prompt <APPEND_SYSTEM.md>`
+ * (appends to it). pi reads a flag value as a file when it's an existing path,
+ * so cradle passes the paths explicitly (pi can't discover either file in an
+ * arbitrary folder). Both ride together when the folder ships both — pi uses
+ * SYSTEM.md as the base with APPEND_SYSTEM.md appended — and `loadAgentFolder`
+ * guarantees at least one path is non-null, so this is never empty.
+ */
+function composeSystemPromptArgs(folder: AgentFolder): string[] {
+  const args: string[] = [];
+  if (folder.systemFilePath !== null) args.push('--system-prompt', folder.systemFilePath);
+  if (folder.appendSystemFilePath !== null) args.push('--append-system-prompt', folder.appendSystemFilePath);
+  return args;
+}
+
+/**
  * Build the bare pi argv. `passthrough` lands last so user-passed flags win
  * under pi's last-wins parsing. The `-e` order is load-bearing: the generated
  * providers extension goes first, then the resolved package entries, then the
@@ -69,8 +85,7 @@ export function composePiArgv(spec: LaunchSpec): string[] {
   const { settings } = folder;
   const argv = [
     spec.piBin,
-    '--append-system-prompt',
-    folder.appendSystemFilePath,
+    ...composeSystemPromptArgs(folder),
     '--no-extensions',
     '--no-skills',
     '--no-prompt-templates'

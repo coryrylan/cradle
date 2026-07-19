@@ -6,6 +6,7 @@ import { composeArgv, composeEnv, composePiArgv, type LaunchSpec } from './launc
 function createFolder(overrides: Partial<AgentFolder> = {}): AgentFolder {
   return {
     dir: '/agents/helper',
+    systemFilePath: null,
     appendSystemFilePath: '/agents/helper/APPEND_SYSTEM.md',
     settings: {},
     providersJson: null,
@@ -104,6 +105,35 @@ describe('composePiArgv', () => {
       '--session-dir',
       '/state/helper/sessions'
     ]);
+  });
+
+  it('should map SYSTEM.md to --system-prompt (replace) and emit no --append-system-prompt when absent', () => {
+    const argv = composePiArgv(
+      createSpec({ folder: createFolder({ systemFilePath: '/agents/helper/SYSTEM.md', appendSystemFilePath: null }) })
+    );
+    expect(argv.slice(0, 3)).toEqual(['pi', '--system-prompt', '/agents/helper/SYSTEM.md']);
+    expect(argv).not.toContain('--append-system-prompt');
+  });
+
+  it('should emit --system-prompt before --append-system-prompt when the folder ships both files', () => {
+    const argv = composePiArgv(
+      createSpec({
+        folder: createFolder({
+          systemFilePath: '/agents/helper/SYSTEM.md',
+          appendSystemFilePath: '/agents/helper/APPEND_SYSTEM.md'
+        })
+      })
+    );
+    // pi uses --system-prompt as the base and appends --append-system-prompt on top,
+    // so cradle emits both, system first, ahead of the isolation flags.
+    expect(argv.slice(0, 5)).toEqual([
+      'pi',
+      '--system-prompt',
+      '/agents/helper/SYSTEM.md',
+      '--append-system-prompt',
+      '/agents/helper/APPEND_SYSTEM.md'
+    ]);
+    expect(argv[5]).toBe('--no-extensions');
   });
 
   it('should place the generated providers extension as the first -e when present', () => {

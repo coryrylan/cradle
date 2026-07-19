@@ -38,6 +38,7 @@ async function addOutsideFile(rel: string, content: string): Promise<void> {
 }
 
 const appendSystemMd = () => addFile('APPEND_SYSTEM.md', '# Role\n');
+const systemMd = () => addFile('SYSTEM.md', '# Role\n');
 const warningsText = (folder: { warnings: readonly string[] }) => folder.warnings.join('\n');
 
 describe('loadAgentFolder', () => {
@@ -45,6 +46,7 @@ describe('loadAgentFolder', () => {
     await appendSystemMd();
     const folder = await loadAgentFolder(dir);
     expect(folder.dir).toBe(dir);
+    expect(folder.systemFilePath).toBeNull();
     expect(folder.appendSystemFilePath).toBe(join(dir, 'APPEND_SYSTEM.md'));
     expect(folder.settings).toEqual({});
     expect(folder.providersJson).toBeNull();
@@ -79,6 +81,23 @@ describe('loadAgentFolder', () => {
     expect(folder.warnings).toEqual([]);
   });
 
+  it('should load an agent with SYSTEM.md only (replaces pi’s prompt), leaving appendSystemFilePath null', async () => {
+    await systemMd();
+    const folder = await loadAgentFolder(dir);
+    expect(folder.systemFilePath).toBe(join(dir, 'SYSTEM.md'));
+    expect(folder.appendSystemFilePath).toBeNull();
+    expect(folder.warnings).toEqual([]);
+  });
+
+  it('should expose both paths when a folder ships SYSTEM.md and APPEND_SYSTEM.md together', async () => {
+    await systemMd();
+    await appendSystemMd();
+    const folder = await loadAgentFolder(dir);
+    expect(folder.systemFilePath).toBe(join(dir, 'SYSTEM.md'));
+    expect(folder.appendSystemFilePath).toBe(join(dir, 'APPEND_SYSTEM.md'));
+    expect(folder.warnings).toEqual([]);
+  });
+
   it('should resolve a relative dir to an absolute one', async () => {
     await appendSystemMd();
     const { relative } = await import('node:path');
@@ -86,11 +105,13 @@ describe('loadAgentFolder', () => {
     expect(folder.dir).toBe(dir);
   });
 
-  it('should reject a folder without APPEND_SYSTEM.md, naming the dir', async () => {
-    await expect(loadAgentFolder(dir)).rejects.toThrow(`not an agent folder: ${dir} (missing APPEND_SYSTEM.md`);
+  it('should reject a folder with neither SYSTEM.md nor APPEND_SYSTEM.md, naming the dir', async () => {
+    await expect(loadAgentFolder(dir)).rejects.toThrow(
+      `not an agent folder: ${dir} (needs SYSTEM.md or APPEND_SYSTEM.md`
+    );
   });
 
-  it('should hint the rename when a folder has an AGENTS.md but no APPEND_SYSTEM.md', async () => {
+  it('should hint the rename when a folder has an AGENTS.md but no system-prompt file', async () => {
     await addFile('AGENTS.md', '# Role\n');
     await expect(loadAgentFolder(dir)).rejects.toThrow('found AGENTS.md, rename it to APPEND_SYSTEM.md');
   });

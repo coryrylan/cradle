@@ -44,7 +44,7 @@ It reports each tool's resolved path and version. Only `pi` is required. `nono` 
 
 ## Create your first agent
 
-An agent folder needs exactly one file to be valid: `APPEND_SYSTEM.md`. Create a directory and drop in the agent's role and instructions as plain Markdown:
+An agent folder needs just one file to be valid: a `SYSTEM.md` or an `APPEND_SYSTEM.md`. `APPEND_SYSTEM.md` _adds_ the agent's role to pi's built-in coding-assistant prompt; `SYSTEM.md` _replaces_ that prompt entirely. Start with `APPEND_SYSTEM.md` — create a directory and drop in the agent's role and instructions as plain Markdown:
 
 ```sh
 mkdir -p ~/dev/agents/my-agent

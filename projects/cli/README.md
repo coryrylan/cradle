@@ -2,7 +2,7 @@
 
 ![CI Build](https://github.com/coryrylan/cradle/actions/workflows/pull-request.yml/badge.svg)
 
-A runtime for portable agents defined as folders. `cradle start <dir>` reads an agent folder — an `APPEND_SYSTEM.md` plus optional pi-native config, skills, extensions, and sandbox posture — and launches the [pi](https://github.com/earendil-works/pi-mono) coding agent configured from it. An agent declaring `sandbox/nono.json` runs inside the [nono](https://github.com/always-further/nono) filesystem sandbox. See [ARCHITECTURE.md](../../ARCHITECTURE.md) for the folder format and [`examples/hello`](../../examples/hello) for a minimal agent. Built with Bun and TypeScript; install the standalone binary via `install.sh` (primary) or the npm package [`@coryrylan/cradle`](https://www.npmjs.com/package/@coryrylan/cradle) (alternative).
+A runtime for portable agents defined as folders. `cradle start <dir>` reads an agent folder — a `SYSTEM.md` or `APPEND_SYSTEM.md` (at least one) plus optional pi-native config, skills, extensions, and sandbox posture — and launches the [pi](https://github.com/earendil-works/pi-mono) coding agent configured from it. An agent declaring `sandbox/nono.json` runs inside the [nono](https://github.com/always-further/nono) filesystem sandbox. See [ARCHITECTURE.md](../../ARCHITECTURE.md) for the folder format and [`examples/hello`](../../examples/hello) for a minimal agent. Built with Bun and TypeScript; install the standalone binary via `install.sh` (primary) or the npm package [`@coryrylan/cradle`](https://www.npmjs.com/package/@coryrylan/cradle) (alternative).
 
 ## Dependencies
 

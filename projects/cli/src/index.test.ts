@@ -150,10 +150,20 @@ describe('start command', () => {
     expect(exitCode).toBe(0);
   });
 
-  it('rejects a directory without APPEND_SYSTEM.md', async () => {
+  it('rejects a directory with neither SYSTEM.md nor APPEND_SYSTEM.md', async () => {
     const { stderr, exitCode } = await runCli(['start', root, '--dry-run'], env);
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain('not an agent folder');
+  });
+
+  it('composes pi --system-prompt for a SYSTEM.md-only folder (replaces pi’s prompt)', async () => {
+    await rm(join(agentDir, 'APPEND_SYSTEM.md'));
+    await writeFile(join(agentDir, 'SYSTEM.md'), '# Role\n', 'utf8');
+    const { stdout, exitCode } = await runCli(['start', agentDir, '--dry-run', '--no-sandbox'], env);
+    const command = stdout.trim().split('\n').at(-1) ?? '';
+    expect(command.startsWith(`pi --system-prompt ${join(agentDir, 'SYSTEM.md')}`)).toBe(true);
+    expect(command).not.toContain('--append-system-prompt');
+    expect(exitCode).toBe(0);
   });
 
   it('surfaces folder warnings on stderr without failing the run', async () => {

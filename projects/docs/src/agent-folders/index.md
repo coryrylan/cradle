@@ -4,7 +4,7 @@
 
 # Agent Folders
 
-A folder with an `APPEND_SYSTEM.md` is a complete agent. Everything else below is optional — add it as the agent grows. Every supported file uses a pi-native or cross-tool-standard name, and the folder mirrors the layout of pi's own agent dir (`~/.pi/agent/`), so anything written for a personal pi config drops in unchanged.
+A folder with a `SYSTEM.md` or `APPEND_SYSTEM.md` is a complete agent. Everything else below is optional — add it as the agent grows. Every supported file uses a pi-native or cross-tool-standard name, and the folder mirrors the layout of pi's own agent dir (`~/.pi/agent/`), so anything written for a personal pi config drops in unchanged.
 
 ```
 my-agent/
@@ -13,12 +13,20 @@ my-agent/
   skills/             optional   markdown playbooks, loaded when relevant
   settings.json       optional   pi-native settings (model selection)
   models.json         optional   pi-native custom provider definitions
-  APPEND_SYSTEM.md    required   the agent's role and instructions
+  SYSTEM.md           required*  replace pi's system prompt (role + instructions)
+  APPEND_SYSTEM.md    required*  append to pi's system prompt (role + instructions)
 ```
 
-## APPEND_SYSTEM.md
+`*` At least one of `SYSTEM.md` / `APPEND_SYSTEM.md` is required; a folder may ship both.
 
-The agent's role, instructions, and personality in Markdown — pi's system-prompt-file convention, the same name pi discovers in `~/.pi/agent/` and `<project>/.pi/`. pi can't discover it in an arbitrary folder on its own, so cradle passes it explicitly (`--append-system-prompt <path>`). A missing `APPEND_SYSTEM.md` means the directory isn't an agent, and `cradle start` fails with a pointer to this page.
+## SYSTEM.md / APPEND_SYSTEM.md
+
+The agent's role, instructions, and personality in Markdown — pi's system-prompt-file convention, the same names pi discovers in `~/.pi/agent/` and `<project>/.pi/`. Two variants, mirroring pi:
+
+- **`SYSTEM.md`** _replaces_ pi's default coding-assistant prompt (`--system-prompt <path>`) — use it when the agent shouldn't carry pi's built-in assistant framing. Context files and skills are still appended by pi.
+- **`APPEND_SYSTEM.md`** _appends_ to pi's default prompt (`--append-system-prompt <path>`) — use it to layer role and instructions on top of the built-in framing.
+
+pi can't discover either file in an arbitrary folder on its own, so cradle passes the paths explicitly. A folder may ship both: cradle passes both flags, and pi uses `SYSTEM.md` as the base with `APPEND_SYSTEM.md` appended. A folder with neither means the directory isn't an agent, and `cradle start` fails with a pointer to this page.
 
 ## settings.json
 

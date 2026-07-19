@@ -2,11 +2,12 @@
 
 ## Your agent is a directory
 
-A folder with an `APPEND_SYSTEM.md` is a complete agent. Everything else — model config, skills, extensions, sandbox posture — is an optional file you add as the agent grows. The folder is static and portable; `cradle` is the runtime that reads it and launches the [pi](https://github.com/earendil-works/pi-mono) coding agent configured from it. Think of cradle as a pi agent switcher: one pi install, many agents, each defined entirely by its directory.
+A folder with a `SYSTEM.md` or `APPEND_SYSTEM.md` is a complete agent. Everything else — model config, skills, extensions, sandbox posture — is an optional file you add as the agent grows. The folder is static and portable; `cradle` is the runtime that reads it and launches the [pi](https://github.com/earendil-works/pi-mono) coding agent configured from it. Think of cradle as a pi agent switcher: one pi install, many agents, each defined entirely by its directory.
 
 ```
 my-agent/
-  APPEND_SYSTEM.md   required   the agent's role and instructions
+  SYSTEM.md          required*  replace pi's system prompt with the agent's role + instructions
+  APPEND_SYSTEM.md   required*  append the agent's role + instructions to pi's default prompt
   settings.json      optional   pi-native settings (model selection)
   models.json        optional   pi-native custom provider definitions
   skills/            optional   markdown playbooks, loaded when relevant
@@ -18,7 +19,9 @@ my-agent/
   connections/       reserved   planned — service auth for tools
 ```
 
-Every supported file uses a pi-native or cross-tool-standard name. The folder mirrors the layout of pi's own agent dir — `~/.pi/agent/` holds the same `APPEND_SYSTEM.md`, `settings.json`, `models.json`, `skills/`, and `extensions/` — so anything written for a personal pi config drops in unchanged. The mirror is layout-deep, not key-deep: `settings.json` keys cradle can't deliver over argv (`theme`, `quietStartup`, …) have no effect in an agent folder and warn at start — see [`settings.json`](#settingsjson).
+`*` At least one of `SYSTEM.md` / `APPEND_SYSTEM.md` is required; a folder may ship both.
+
+Every supported file uses a pi-native or cross-tool-standard name. The folder mirrors the layout of pi's own agent dir — `~/.pi/agent/` holds the same `SYSTEM.md`, `APPEND_SYSTEM.md`, `settings.json`, `models.json`, `skills/`, and `extensions/` — so anything written for a personal pi config drops in unchanged. The mirror is layout-deep, not key-deep: `settings.json` keys cradle can't deliver over argv (`theme`, `quietStartup`, …) have no effect in an agent folder and warn at start — see [`settings.json`](#settingsjson).
 
 ```sh
 cradle start ./my-agent                 # launch pi as this agent; sandboxed when sandbox/nono.json exists
@@ -52,9 +55,14 @@ The alias resolves to an absolute path before `loadAgentFolder` sees it, so fold
 
 ## File-by-file
 
-### `APPEND_SYSTEM.md` (required)
+### `SYSTEM.md` / `APPEND_SYSTEM.md` (at least one required)
 
-The agent's role, instructions, and personality in Markdown — pi's [system-prompt-file convention](https://pi.dev/docs/latest/usage#system-prompt-files), the same name pi discovers in `~/.pi/agent/` and `<project>/.pi/`. pi can't discover it in an arbitrary folder, so cradle passes it explicitly (`--append-system-prompt <path>`); passing the flag also replaces pi's own APPEND_SYSTEM.md discovery, so the personal global file never bleeds into an agent run. Missing `APPEND_SYSTEM.md` means the directory is not an agent; `cradle start` fails with a pointer to this spec (and a rename hint when it finds a legacy `AGENTS.md`).
+The agent's role, instructions, and personality in Markdown — pi's [system-prompt-file convention](https://pi.dev/docs/latest/usage#system-prompt-files), the same names pi discovers in `~/.pi/agent/` and `<project>/.pi/`. Two variants, mirroring pi:
+
+- **`SYSTEM.md`** _replaces_ pi's default coding-assistant prompt (`--system-prompt <path>`). Use it when the agent should not carry pi's built-in assistant framing. Context files and skills are still appended by pi.
+- **`APPEND_SYSTEM.md`** _appends_ to pi's default prompt (`--append-system-prompt <path>`). Use it to layer role and instructions on top of the built-in framing.
+
+A folder may ship both — cradle passes both flags, and pi uses `SYSTEM.md` as the base with `APPEND_SYSTEM.md` appended on top. pi can't discover either file in an arbitrary folder, so cradle passes the paths explicitly; passing a flag also replaces pi's own discovery of that file, so a personal global `~/.pi/agent/SYSTEM.md` or `APPEND_SYSTEM.md` never bleeds into an agent run. A folder with neither file is not an agent; `cradle start` fails with a pointer to this spec (and a rename hint when it finds a legacy `AGENTS.md`, which maps to `APPEND_SYSTEM.md`).
 
 ### `settings.json`
 
@@ -162,7 +170,8 @@ Cradle translates the folder into explicit pi flags — never into files inside 
 
 | Agent folder                      | pi mechanism                                                   |
 | --------------------------------- | -------------------------------------------------------------- |
-| `APPEND_SYSTEM.md`                | `--append-system-prompt <path>`                                |
+| `SYSTEM.md`                       | `--system-prompt <path>` (replaces pi's default prompt)        |
+| `APPEND_SYSTEM.md`                | `--append-system-prompt <path>` (appends to it)                |
 | `settings.json` model keys        | `--provider` / `--model` / `--thinking`                        |
 | `models.json`                     | generated `-e` extension → `pi.registerProvider(…)`            |
 | `settings.json` `packages`        | per-agent npm install → each package's `pi.extensions` as `-e` |
@@ -187,7 +196,7 @@ One env var breaks the argv-only rule on purpose: sandboxed runs export `MISE_CA
 
 ## Order of support
 
-1. `APPEND_SYSTEM.md` — v1
+1. `SYSTEM.md` / `APPEND_SYSTEM.md` — v1
 2. `settings.json` / `models.json` — v1
 3. `skills/` — v1
 4. `extensions/` — v1

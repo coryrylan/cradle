@@ -1,7 +1,8 @@
 // Loader/validator for the agent folder format (see /ARCHITECTURE.md). A folder
-// with an APPEND_SYSTEM.md is a complete agent; settings.json, models.json, skills/,
-// extensions/, and sandbox/nono.json are optional. Missing APPEND_SYSTEM.md and
-// malformed JSON are hard errors; everything else unexpected is a warning + continue.
+// with a SYSTEM.md or APPEND_SYSTEM.md is a complete agent; settings.json,
+// models.json, skills/, extensions/, and sandbox/nono.json are optional. A folder
+// with neither system-prompt file, and malformed JSON, are hard errors; everything
+// else unexpected is a warning + continue.
 
 import type { Dirent } from 'node:fs';
 import { lstat, readdir, stat } from 'node:fs/promises';
@@ -89,8 +90,14 @@ export interface AgentSandbox {
 
 export interface AgentFolder {
   readonly dir: string;
-  /** Abs path of APPEND_SYSTEM.md — appended to pi's system prompt via `--append-system-prompt`. */
-  readonly appendSystemFilePath: string;
+  /**
+   * Abs path of SYSTEM.md — REPLACES pi's default system prompt via
+   * `--system-prompt`; `null` when the folder has no SYSTEM.md. `loadAgentFolder`
+   * guarantees at least one of `systemFilePath`/`appendSystemFilePath` is non-null.
+   */
+  readonly systemFilePath: string | null;
+  /** Abs path of APPEND_SYSTEM.md — appended to pi's system prompt via `--append-system-prompt`; `null` when absent. */
+  readonly appendSystemFilePath: string | null;
   readonly settings: AgentSettings;
   /** Serialized `providers` object from models.json, `null` when absent. */
   readonly providersJson: string | null;
@@ -103,7 +110,15 @@ export interface AgentFolder {
 
 const THINKING_LEVELS: readonly ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 const RESERVED_DIRS = new Set(['schedules', 'subagents', 'channels', 'connections']);
-const KNOWN_ENTRIES = new Set(['APPEND_SYSTEM.md', 'settings.json', 'models.json', 'skills', 'extensions', 'sandbox']);
+const KNOWN_ENTRIES = new Set([
+  'SYSTEM.md',
+  'APPEND_SYSTEM.md',
+  'settings.json',
+  'models.json',
+  'skills',
+  'extensions',
+  'sandbox'
+]);
 const REPO_ENTRIES = new Set(['.git', '.gitignore', '.DS_Store', 'README.md', 'LICENSE']);
 const EMPTY_GRANTS: AgentSandboxGrants = { read: [], write: [], allow: [] };
 const EMPTY_SANDBOX: AgentSandbox = {
@@ -116,16 +131,21 @@ export async function loadAgentFolder(dir: string): Promise<AgentFolder> {
   const abs = resolve(dir);
   const entries = await readAgentDir(abs);
   const byName = new Map(entries.map(entry => [entry.name, entry]));
-  if (!byName.has('APPEND_SYSTEM.md')) {
+  const hasSystem = byName.has('SYSTEM.md');
+  const hasAppendSystem = byName.has('APPEND_SYSTEM.md');
+  if (!hasSystem && !hasAppendSystem) {
     const renameHint = byName.has('AGENTS.md') ? ' — found AGENTS.md, rename it to APPEND_SYSTEM.md' : '';
-    throw new Error(`not an agent folder: ${abs} (missing APPEND_SYSTEM.md${renameHint} — see ARCHITECTURE.md)`);
+    throw new Error(
+      `not an agent folder: ${abs} (needs SYSTEM.md or APPEND_SYSTEM.md${renameHint} — see ARCHITECTURE.md)`
+    );
   }
 
   const warnings: string[] = [];
   warnUnknownEntries(entries, warnings);
   return {
     dir: abs,
-    appendSystemFilePath: join(abs, 'APPEND_SYSTEM.md'),
+    systemFilePath: hasSystem ? join(abs, 'SYSTEM.md') : null,
+    appendSystemFilePath: hasAppendSystem ? join(abs, 'APPEND_SYSTEM.md') : null,
     settings: await loadSettings(abs, byName.has('settings.json'), warnings),
     providersJson: await loadProviders(abs, byName.has('models.json'), warnings),
     skillsDir: await resolveSkillsDir(abs, byName.get('skills'), warnings),

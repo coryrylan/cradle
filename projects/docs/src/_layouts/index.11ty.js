@@ -35,9 +35,9 @@ export function render(data) {
         </head>
         <body>
           <nve-page>
-            <!-- UI built with https://nvidia.github.io/elements/ --> 
+            <!-- UI built with https://nvidia.github.io/elements/ -->
             <nve-page-header slot="header">
-              <a slot="prefix" href="./" nve-text="heading sm">Cradle</a>
+              <a slot="prefix" href="./" nve-text="heading sm">@coryrylan/cradle</a>
               <nve-button slot="suffix" container="flat"><a href="https://github.com/coryrylan/cradle" target="_blank">GitHub</a></nve-button>
               <nve-icon-button
                 slot="suffix"
