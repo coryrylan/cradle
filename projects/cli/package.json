@@ -1,6 +1,6 @@
 {
   "name": "@coryrylan/cradle",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A runtime for portable agents defined as folders — launches the pi coding agent configured from an agent folder, sandboxed with nono",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

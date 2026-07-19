@@ -1,3 +1,9 @@
+## [1.0.1](https://github.com/coryrylan/cradle/compare/cradle-v1.0.0...cradle-v1.0.1) (2026-07-19)
+
+### Bug Fixes
+
+* **cli:** update agent folder specifications to include system.md ([52f8aa9](https://github.com/coryrylan/cradle/commit/52f8aa9a1aad73d34baf58f647b4ecbedf0dfd5a))
+
 ## 1.0.0 (2026-07-19)
 
 ### Features
