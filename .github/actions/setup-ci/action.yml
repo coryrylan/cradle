@@ -1,0 +1,21 @@
+name: Setup CI dependencies
+description: Install the mise toolchain and workspace dependencies for CI jobs.
+
+runs:
+  using: composite
+  steps:
+    - uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d
+      with:
+        version: 2026.6.14
+        install: true
+        cache: true
+    - uses: google/wireit@setup-github-actions-caching/v2
+    - name: Cache bun install cache
+      uses: actions/cache@v5
+      with:
+        path: ~/.bun/install/cache
+        key: ${{ runner.os }}-${{ runner.arch }}-bun-cache-${{ hashFiles('bun.lock') }}-v1
+        restore-keys: ${{ runner.os }}-${{ runner.arch }}-bun-cache-
+    - name: Install dependencies
+      shell: bash
+      run: bun install --frozen-lockfile

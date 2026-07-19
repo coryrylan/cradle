@@ -1,0 +1,24 @@
+[settings]
+lockfile = true
+
+[tools]
+bun = "1.3.14"
+node = "26.4.0"
+
+[tasks.clean]
+run = [
+  "git clean -dfX"
+]
+
+[tasks.install]
+run = [
+  "mise install",
+  "mise exec -- bun install --frozen-lockfile",
+]
+
+[tasks.setup]
+run = [
+  "mise run clean",
+  "mise run install",
+  "bun run ci",
+]

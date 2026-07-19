@@ -26,11 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-      - uses: google/wireit@setup-github-actions-caching/v2
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/setup-ci
       - run: bun run build
         working-directory: projects/docs
         env:
