@@ -1,3 +1,9 @@
+## [1.1.0](https://github.com/coryrylan/cradle/compare/cradle-v1.0.1...cradle-v1.1.0) (2026-07-20)
+
+### Features
+
+* **cli:** enhance sandbox configuration for agent-browser ([363e4b1](https://github.com/coryrylan/cradle/commit/363e4b1b8b7896001ac459c9c508f8a1176868e2))
+
 ## [1.0.1](https://github.com/coryrylan/cradle/compare/cradle-v1.0.0...cradle-v1.0.1) (2026-07-19)
 
 ### Bug Fixes
