@@ -40,7 +40,7 @@ Outbound network is **open by default within a sandboxed run**. A `network` bloc
 | ----------------- | ------------------------------------------------------------------------------------------------- |
 | `block`           | `true` denies **all** outbound traffic (full offline).                                            |
 | `allow_domain`    | Host allowlist. **Presence flips nono to default-deny** — unlisted hosts are refused.             |
-| `open_port`       | localhost TCP ports the agent may connect to or bind (e.g. a local model or dev server).          |
+| `open_port`       | localhost TCP ports the agent may connect/bind; `0` allows any outbound localhost port on macOS.  |
 | `listen_port`     | TCP ports the agent may listen on.                                                                |
 | `network_profile` | A named nono network-policy profile (opaque pass-through; requires a host `network-policy.json`). |
 
@@ -52,24 +52,30 @@ CLI flags override the folder: `--offline` (full block) and repeatable `--allow-
 
 Some tools need OS capabilities the conservative base profile denies. `sandbox/nono.json` can append raw macOS Seatbelt rules under `unsafe_macos_seatbelt_rules` — s-expressions merged verbatim after the base profile's rules. nono validates the syntax at load. Each one widens the OS sandbox, so audit them where they live — the folder's `sandbox/nono.json` or the generated per-agent profile — rather than in run output: nono's capabilities banner (shown with `--verbose`) never lists seatbelt rules. Ignored on Linux.
 
-**Browser automation is the motivating case.** [agent-browser](https://agent-browser.dev/) with Chrome for Testing runs sandboxed under nono with exactly two rules, plus Chrome's own `--no-sandbox` flag:
+**Browser automation is the motivating case.** [agent-browser](https://agent-browser.dev/) with Chrome for Testing runs sandboxed under nono with a directory grant, a direct-child Unix socket grant, exactly two macOS rules, and Chrome's own `--no-sandbox` flag:
 
 ```json
 {
   "filesystem": {
-    "allow": ["~/.agent-browser"]
+    "allow": ["~/.agent-browser"],
+    "unix_socket_dir_bind": ["~/.agent-browser"]
+  },
+  "network": {
+    "open_port": [0]
   },
   "unsafe_macos_seatbelt_rules": ["(allow mach-register)", "(allow iokit-open)"]
 }
 ```
 
-| Entry                    | Why it's needed                                                                                                 |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `allow ~/.agent-browser` | agent-browser's own state dir — daemon socket, downloaded Chrome, config.                                       |
-| `(allow mach-register)`  | Chrome's Crashpad handler registers a Mach service; the base profile denies it, so the browser process aborts.  |
-| `(allow iokit-open)`     | Chrome opens IOKit user clients during startup even headless; without it the browser process crashes on launch. |
+| Entry                                   | Why it's needed                                                                                                 |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `allow ~/.agent-browser`                | agent-browser's state dir — downloaded Chrome, config, and daemon socket files.                                 |
+| `unix_socket_dir_bind ~/.agent-browser` | Lets the CLI and daemon connect to and bind direct-child Unix sockets; without it, `connect()` returns `EPERM`. |
+| `open_port 0`                           | Lets the daemon connect to Chrome's random localhost DevTools port on macOS; otherwise CDP returns `EPERM`.     |
+| `(allow mach-register)`                 | Chrome's Crashpad handler registers a Mach service; the base profile denies it, so the browser process aborts.  |
+| `(allow iokit-open)`                    | Chrome opens IOKit user clients during startup even headless; without it the browser process crashes on launch. |
 
-The two rules are IPC/IOKit capabilities only — filesystem and network boundaries stay intact. Chrome's **own** nested sandbox can't initialize inside nono's seatbelt (macOS forbids nesting), so its child processes need `--no-sandbox` too, delivered through an agent extension so it travels with the folder.
+`unix_socket_dir_bind` is non-recursive. Point it only at a dedicated socket directory, never a broad parent such as `~` or `/tmp`. Port `0` is nono's macOS-only outbound localhost wildcard; Linux requires explicit ports. The two macOS rules are IPC/IOKit capabilities only — filesystem and network boundaries stay intact. Chrome's **own** nested sandbox can't initialize inside nono's seatbelt (macOS forbids nesting), so its child processes need `--no-sandbox` too, delivered through an agent extension so it travels with the folder.
 
 ## Opting out
 

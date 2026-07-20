@@ -48,6 +48,9 @@ describe('start command', () => {
     const { stdout, exitCode } = await runCli(['start', agentDir, '--dry-run'], env);
     const lines = stdout.trim().split('\n');
     expect(lines.some(line => line.startsWith('write: ') && line.endsWith('providers.ts'))).toBe(true);
+    expect(lines.some(line => line.startsWith('write: ') && line.endsWith('agent-browser-nono-fallback.ts'))).toBe(
+      true
+    );
     expect(lines.some(line => line.startsWith('write: ') && line.endsWith('nono-profile.json'))).toBe(true);
     const command = lines.at(-1) ?? '';
     // The wrapper points nono at the generated per-agent profile; grants live inside it, not as flags.
@@ -69,6 +72,7 @@ describe('start command', () => {
     await rm(join(agentDir, 'sandbox'), { recursive: true });
     const { stdout, stderr, exitCode } = await runCli(['start', agentDir, '--dry-run'], env);
     expect(stdout.trim().split('\n').at(-1)?.startsWith('pi --append-system-prompt')).toBe(true);
+    expect(stdout).not.toContain('agent-browser-nono-fallback.ts');
     expect(stderr).toContain('sandbox/nono.json not found');
     expect(exitCode).toBe(0);
   });
@@ -110,7 +114,8 @@ describe('start command', () => {
     const command = lines.at(-1) ?? '';
     expect(command.startsWith('pi --append-system-prompt')).toBe(true);
     expect(command).not.toContain('nono');
-    // No sandbox → no profile generated, so no profile write line.
+    // No sandbox → no generated fallback or profile write lines.
+    expect(lines.some(line => line.endsWith('agent-browser-nono-fallback.ts'))).toBe(false);
     expect(lines.some(line => line.endsWith('nono-profile.json'))).toBe(false);
     expect(exitCode).toBe(0);
   });

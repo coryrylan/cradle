@@ -14,7 +14,7 @@ function createFolder(overrides: Partial<AgentFolder> = {}): AgentFolder {
     extensionFiles: [],
     sandbox: {
       posture: 'enabled',
-      filesystem: { read: [], write: [], allow: [] },
+      filesystem: { read: [], write: [], allow: [], unixSocketDirBind: [] },
       unsafeMacosSeatbeltRules: []
     },
     warnings: [],
@@ -59,6 +59,8 @@ describe('composePiArgv', () => {
       '--no-prompt-templates',
       '-e',
       '/state/helper/extensions/providers.ts',
+      '-e',
+      '/state/helper/extensions/agent-browser-nono-fallback.ts',
       '-e',
       '/agents/helper/extensions/flip.ts',
       '-e',
@@ -147,7 +149,14 @@ describe('composePiArgv', () => {
     expect(argv[argv.indexOf('-e') + 1]).toBe('/ext/providers.ts');
   });
 
-  it('should add no -e flags when no providers, packages, or agent extensions are present', () => {
+  it('should load the agent-browser nono fallback only on sandboxed runs', () => {
+    const sandboxed = composePiArgv(createSpec({ sandbox: true, extensionsDir: '/generated' }));
+    expect(sandboxed).toContain('/generated/agent-browser-nono-fallback.ts');
+    const unsandboxed = composePiArgv(createSpec({ sandbox: false, extensionsDir: '/generated' }));
+    expect(unsandboxed).not.toContain('/generated/agent-browser-nono-fallback.ts');
+  });
+
+  it('should add no -e flags when no providers, packages, or agent extensions are present unsandboxed', () => {
     const argv = composePiArgv(createSpec({ sandbox: false }));
     expect(argv).not.toContain('-e');
   });
@@ -171,7 +180,8 @@ describe('composePiArgv', () => {
       })
     );
     const indexOf = (value: string) => argv.indexOf(value);
-    expect(indexOf('/ext/providers.ts')).toBeLessThan(
+    expect(indexOf('/ext/providers.ts')).toBeLessThan(indexOf('/ext/agent-browser-nono-fallback.ts'));
+    expect(indexOf('/ext/agent-browser-nono-fallback.ts')).toBeLessThan(
       indexOf('/state/helper/npm/node_modules/pi-example-tool/index.ts')
     );
     expect(indexOf('/state/helper/npm/node_modules/pi-example-tool/index.ts')).toBeLessThan(

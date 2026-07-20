@@ -1,6 +1,10 @@
 {
   "filesystem": {
-    "allow": ["~/.agent-browser"]
+    "allow": ["~/.agent-browser"],
+    "unix_socket_dir_bind": ["~/.agent-browser"]
+  },
+  "network": {
+    "open_port": [0]
   },
   "unsafe_macos_seatbelt_rules": ["(allow mach-register)", "(allow iokit-open)"]
 }

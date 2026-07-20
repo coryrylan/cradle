@@ -5,6 +5,7 @@
 
 import { join } from 'node:path';
 
+import { AGENT_BROWSER_NONO_FALLBACK_EXTENSION_FILE } from './extensions/agent-browser-nono-fallback.js';
 import type { AgentFolder } from './folder.js';
 
 export interface LaunchSpec {
@@ -75,10 +76,11 @@ function composeSystemPromptArgs(folder: AgentFolder): string[] {
 /**
  * Build the bare pi argv. `passthrough` lands last so user-passed flags win
  * under pi's last-wins parsing. The `-e` order is load-bearing: the generated
- * providers extension goes first, then the resolved package entries, then the
- * agent's own `extensions/` files — which load with the agent's providers
- * registered and any package-provided tools already available, since the
- * agent's own extensions may depend on them.
+ * providers extension goes first, followed by the sandbox-only agent-browser
+ * environment fallback, the resolved package entries, then the agent's own
+ * `extensions/` files — which load with the agent's providers registered,
+ * sandbox subprocess compatibility configured, and any package-provided tools
+ * already available, since the agent's own extensions may depend on them.
  */
 export function composePiArgv(spec: LaunchSpec): string[] {
   const { folder } = spec;
@@ -91,6 +93,7 @@ export function composePiArgv(spec: LaunchSpec): string[] {
     '--no-prompt-templates'
   ];
   if (folder.providersJson !== null) argv.push('-e', join(spec.extensionsDir, 'providers.ts'));
+  if (spec.sandbox) argv.push('-e', join(spec.extensionsDir, AGENT_BROWSER_NONO_FALLBACK_EXTENSION_FILE));
   for (const entry of spec.packageEntries ?? []) argv.push('-e', entry);
   for (const extension of folder.extensionFiles) argv.push('-e', extension);
   if (folder.skillsDir !== null) argv.push('--skill', folder.skillsDir);

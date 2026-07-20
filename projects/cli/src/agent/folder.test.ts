@@ -7,7 +7,7 @@ import { loadAgentFolder, type AgentSandbox } from './folder.js';
 
 const EMPTY_SANDBOX: AgentSandbox = {
   posture: 'unconfigured',
-  filesystem: { read: [], write: [], allow: [] },
+  filesystem: { read: [], write: [], allow: [], unixSocketDirBind: [] },
   unsafeMacosSeatbeltRules: []
 };
 
@@ -75,7 +75,7 @@ describe('loadAgentFolder', () => {
     expect(folder.sandbox).toEqual({
       posture: 'enabled',
       network: { block: true },
-      filesystem: { read: ['~/data'], write: [], allow: [] },
+      filesystem: { read: ['~/data'], write: [], allow: [], unixSocketDirBind: [] },
       unsafeMacosSeatbeltRules: []
     });
     expect(folder.warnings).toEqual([]);
@@ -393,7 +393,7 @@ describe('loadAgentFolder', () => {
         block: false,
         network_profile: 'developer',
         allow_domain: ['api.z.ai', 'localhost'],
-        open_port: [11434],
+        open_port: [0, 11434],
         listen_port: [8080]
       };
       await addFile('sandbox/nono.json', JSON.stringify({ network }));
@@ -402,7 +402,7 @@ describe('loadAgentFolder', () => {
         block: false,
         networkProfile: 'developer',
         allowDomain: ['api.z.ai', 'localhost'],
-        openPort: [11434],
+        openPort: [0, 11434],
         listenPort: [8080]
       });
       expect(folder.warnings).toEqual([]);
@@ -478,47 +478,64 @@ describe('loadAgentFolder', () => {
       expect(warningsText(folder)).toContain('sandbox must be true or false');
     });
 
-    it('should parse all three filesystem grant keys with values intact', async () => {
+    it('should parse all filesystem grant keys with values intact', async () => {
       await appendSystemMd();
       await addFile(
         'sandbox/nono.json',
         JSON.stringify({
-          filesystem: { read: ['~/data', '/etc/certs'], write: ['$HOME/out'], allow: ['~/scratch', '/opt/cache'] }
+          filesystem: {
+            read: ['~/data', '/etc/certs'],
+            write: ['$HOME/out'],
+            allow: ['~/scratch', '/opt/cache'],
+            unix_socket_dir_bind: ['~/.agent-browser']
+          }
         })
       );
       const folder = await loadAgentFolder(dir);
       expect(folder.sandbox.filesystem).toEqual({
         read: ['~/data', '/etc/certs'],
         write: ['$HOME/out'],
-        allow: ['~/scratch', '/opt/cache']
+        allow: ['~/scratch', '/opt/cache'],
+        unixSocketDirBind: ['~/.agent-browser']
       });
       expect(warningsText(folder)).not.toContain('filesystem');
     });
 
     it('should warn and drop non-string-array filesystem grants', async () => {
       await appendSystemMd();
-      await addFile('sandbox/nono.json', JSON.stringify({ filesystem: { read: 'nope', write: ['/ok'] } }));
+      await addFile(
+        'sandbox/nono.json',
+        JSON.stringify({ filesystem: { read: 'nope', write: ['/ok'], unix_socket_dir_bind: 'nope' } })
+      );
       const folder = await loadAgentFolder(dir);
-      expect(folder.sandbox.filesystem).toEqual({ read: [], write: ['/ok'], allow: [] });
+      expect(folder.sandbox.filesystem).toEqual({ read: [], write: ['/ok'], allow: [], unixSocketDirBind: [] });
       expect(warningsText(folder)).toContain('read must be an array of strings');
+      expect(warningsText(folder)).toContain('unix_socket_dir_bind must be an array of strings');
     });
 
-    it('should warn and drop grant entries that are not path-shaped (flag smuggling)', async () => {
+    it('should warn and drop filesystem grant entries that are not path-shaped', async () => {
       await appendSystemMd();
       await addFile(
         'sandbox/nono.json',
-        JSON.stringify({ filesystem: { read: ['--danger', 'relative/x', '/ok', '~/ok', '$HOME/ok', '~', '$HOME'] } })
+        JSON.stringify({
+          filesystem: {
+            read: ['--danger', 'relative/x', '/ok', '~/ok', '$HOME/ok', '~', '$HOME'],
+            unix_socket_dir_bind: ['--danger', 'relative/socket', '~/.agent-browser']
+          }
+        })
       );
       const folder = await loadAgentFolder(dir);
       expect(folder.sandbox.filesystem.read).toEqual(['/ok', '~/ok', '$HOME/ok', '~', '$HOME']);
+      expect(folder.sandbox.filesystem.unixSocketDirBind).toEqual(['~/.agent-browser']);
       expect(warningsText(folder)).toContain('ignored: --danger, relative/x');
+      expect(warningsText(folder)).toContain('ignored: --danger, relative/socket');
     });
 
     it('should warn when filesystem is not an object', async () => {
       await appendSystemMd();
       await addFile('sandbox/nono.json', JSON.stringify({ filesystem: 'nope' }));
       const folder = await loadAgentFolder(dir);
-      expect(folder.sandbox.filesystem).toEqual({ read: [], write: [], allow: [] });
+      expect(folder.sandbox.filesystem).toEqual({ read: [], write: [], allow: [], unixSocketDirBind: [] });
       expect(warningsText(folder)).toContain('filesystem must be an object');
     });
 

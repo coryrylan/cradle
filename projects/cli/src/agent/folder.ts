@@ -40,6 +40,8 @@ export interface AgentSandboxGrants {
   readonly read: readonly string[];
   readonly write: readonly string[];
   readonly allow: readonly string[];
+  /** Direct-child Unix socket paths the process may connect to and bind. */
+  readonly unixSocketDirBind: readonly string[];
 }
 
 /**
@@ -120,7 +122,7 @@ const KNOWN_ENTRIES = new Set([
   'sandbox'
 ]);
 const REPO_ENTRIES = new Set(['.git', '.gitignore', '.DS_Store', 'README.md', 'LICENSE']);
-const EMPTY_GRANTS: AgentSandboxGrants = { read: [], write: [], allow: [] };
+const EMPTY_GRANTS: AgentSandboxGrants = { read: [], write: [], allow: [], unixSocketDirBind: [] };
 const EMPTY_SANDBOX: AgentSandbox = {
   posture: 'unconfigured',
   filesystem: EMPTY_GRANTS,
@@ -535,11 +537,12 @@ function readGrants(value: JsonValue | undefined, path: string, warnings: string
     warnings.push(`${path}: filesystem must be an object — ignored`);
     return EMPTY_GRANTS;
   }
-  warnUnsupportedKeys(value, `${path} filesystem`, ['read', 'write', 'allow'], warnings);
+  warnUnsupportedKeys(value, `${path} filesystem`, ['read', 'write', 'allow', 'unix_socket_dir_bind'], warnings);
   return {
     read: readStringList(value, 'read', path, warnings),
     write: readStringList(value, 'write', path, warnings),
-    allow: readStringList(value, 'allow', path, warnings)
+    allow: readStringList(value, 'allow', path, warnings),
+    unixSocketDirBind: readStringList(value, 'unix_socket_dir_bind', path, warnings)
   };
 }
 
@@ -555,9 +558,8 @@ function readStringList(
     warnings.push(`${path}: ${key} must be an array of strings — ignored`);
     return [];
   }
-  // Grants become `nono run` flag values — only accept path-shaped entries (the
-  // shared guard) so a hostile folder can't smuggle flags (e.g. a leading `-`)
-  // into the sandbox argv.
+  // Grants become nono profile path values — only accept path-shaped entries
+  // so a hostile folder can't smuggle malformed policy values.
   const dropped = value.filter(entry => !isPathShaped(entry));
   if (dropped.length > 0) {
     warnings.push(`${path}: ${key} entries must be absolute, ~/, or $HOME/ paths — ignored: ${dropped.join(', ')}`);

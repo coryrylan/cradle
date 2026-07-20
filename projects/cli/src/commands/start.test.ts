@@ -32,6 +32,7 @@ async function addFile(rel: string, content: string): Promise<void> {
 const allBins = { nono: '/shims/nono', pi: '/shims/pi' };
 const deps = { cwd: '/work', home: '/home/u', which: createWhichStub(allBins) };
 const relFiles = (plan: { files: readonly { rel: string }[] }) => plan.files.map(file => file.rel);
+const agentBrowserNonoFallbackFile = 'agent-browser-nono-fallback.ts';
 
 describe('planStart', () => {
   it('should compose a sandboxed plan with the resolved nono, including --silent by default', async () => {
@@ -46,7 +47,8 @@ describe('planStart', () => {
     expect(plan.extensionsDir).toBe(join(stateDir, 'extensions'));
     expect(plan.sessionsDir).toBe(join(stateDir, 'sessions'));
     expect(plan.launch.miseCacheDir).toBe(join(stateDir, 'mise-cache'));
-    expect(relFiles(plan)).toEqual([]);
+    expect(relFiles(plan)).toEqual([agentBrowserNonoFallbackFile]);
+    expect(composeArgv(plan.launch)).toContain(join(plan.extensionsDir, agentBrowserNonoFallbackFile));
     expect(plan.profile?.path).toBe(profilePath);
     expect(JSON.parse(plan.profile?.content ?? '{}').extends).toBe('default');
     expect(plan.dryRun).toBe(false);
@@ -57,6 +59,7 @@ describe('planStart', () => {
     const plan = await planStart({ dir: agentDir }, { ...deps, which: createWhichStub({ pi: '/shims/pi' }) });
     expect(composeArgv(plan.launch)[0]).toBe('/shims/pi');
     expect(plan.profile).toBeNull();
+    expect(relFiles(plan)).toEqual([]);
     expect(plan.warnings.join('\n')).toContain('sandbox/nono.json not found');
   });
 
@@ -111,15 +114,18 @@ describe('planStart', () => {
   it('should emit the providers extension only when the agent defines models.json', async () => {
     await addFile('models.json', JSON.stringify({ providers: { ollama: { baseUrl: 'http://x/v1' } } }));
     const plan = await planStart({ dir: agentDir }, deps);
-    expect(relFiles(plan)).toEqual(['providers.ts']);
+    expect(relFiles(plan)).toEqual(['providers.ts', agentBrowserNonoFallbackFile]);
     expect(composeArgv(plan.launch)).toContain(join(plan.extensionsDir, 'providers.ts'));
   });
 
-  it('should pass agent extensions/ files straight through as -e paths, nothing generated', async () => {
+  it('should pass agent extensions/ files straight through after the sandbox fallback', async () => {
     await addFile('extensions/flip.ts', 'export default function () {};\n');
     const plan = await planStart({ dir: agentDir }, deps);
-    expect(relFiles(plan)).toEqual([]);
-    expect(composeArgv(plan.launch)).toContain(join(agentDir, 'extensions', 'flip.ts'));
+    expect(relFiles(plan)).toEqual([agentBrowserNonoFallbackFile]);
+    const argv = composeArgv(plan.launch);
+    expect(argv.indexOf(join(plan.extensionsDir, agentBrowserNonoFallbackFile))).toBeLessThan(
+      argv.indexOf(join(agentDir, 'extensions', 'flip.ts'))
+    );
   });
 
   const profileNetwork = (plan: { profile?: { content: string } | null }) =>
@@ -201,11 +207,21 @@ describe('planStart', () => {
   });
 
   it('should bake the agent filesystem grants into the profile, disclosed by nono not cradle', async () => {
-    await addFile('sandbox/nono.json', JSON.stringify({ filesystem: { read: ['~/data'], allow: ['/scratch'] } }));
+    await addFile(
+      'sandbox/nono.json',
+      JSON.stringify({
+        filesystem: {
+          read: ['~/data'],
+          allow: ['/scratch'],
+          unix_socket_dir_bind: ['~/.agent-browser']
+        }
+      })
+    );
     const sandboxed = await planStart({ dir: agentDir }, deps);
     const profile = JSON.parse(sandboxed.profile?.content ?? '{}');
     expect(profile.filesystem.read).toContain('/home/u/data');
     expect(profile.filesystem.allow).toContain('/scratch');
+    expect(profile.filesystem.unix_socket_dir_bind).toEqual(['/home/u/.agent-browser']);
   });
 
   it('should bake the agent seatbelt rules into the profile', async () => {
@@ -367,7 +383,7 @@ describe('materializeStart packages', () => {
     await writeFile(join(pkgDir, 'index.ts'), '', 'utf8');
   }
 
-  it('should call the installer with the install command and npmDir, then resolve -e entries after the generated providers extension', async () => {
+  it('should call the installer with the install command and npmDir, then resolve -e entries after generated extensions', async () => {
     await addFile('settings.json', JSON.stringify({ packages: ['npm:pi-example-tool'] }));
     await addFile('models.json', JSON.stringify({ providers: { ollama: { baseUrl: 'http://x/v1' } } }));
     const plan = await planStart({ dir: agentDir }, deps);
@@ -381,7 +397,9 @@ describe('materializeStart packages', () => {
     expect(calls).toEqual([{ command: ['npm', 'install', '--ignore-scripts'], cwd: npmDir }]);
     const entry = join(npmDir, 'node_modules', 'pi-example-tool', 'index.ts');
     expect(result.argv).toContain(entry);
-    expect(result.argv.indexOf(entry)).toBeGreaterThan(result.argv.indexOf(join(plan.extensionsDir, 'providers.ts')));
+    expect(result.argv.indexOf(entry)).toBeGreaterThan(
+      result.argv.indexOf(join(plan.extensionsDir, agentBrowserNonoFallbackFile))
+    );
     expect(result.warnings).toEqual([]);
   });
 
@@ -487,13 +505,19 @@ describe('materializeStart', () => {
     await materializeStart(plan);
     // Assert the on-disk file, not the in-memory plan.files, so a write-time
     // transform would fail here.
-    expect(await readdir(plan.extensionsDir)).toEqual(['providers.ts']);
+    expect((await readdir(plan.extensionsDir)).sort()).toEqual([agentBrowserNonoFallbackFile, 'providers.ts'].sort());
     expect(await readFile(join(plan.extensionsDir, 'providers.ts'), 'utf8')).toContain('registerProvider');
+    expect(await readFile(join(plan.extensionsDir, agentBrowserNonoFallbackFile), 'utf8')).toContain(
+      'AGENT_BROWSER_PROXY'
+    );
     expect(await readdir(plan.sessionsDir)).toEqual([]);
   });
 
-  it('should write no extensions dir when the agent declares nothing generated', async () => {
-    const plan = await planStart({ dir: agentDir }, deps);
+  it('should write no extensions dir when an unsandboxed agent declares nothing generated', async () => {
+    const plan = await planStart(
+      { dir: agentDir, noSandbox: true },
+      { ...deps, which: createWhichStub({ pi: '/shims/pi' }) }
+    );
     await materializeStart(plan);
     expect(await exists(plan.extensionsDir)).toBe(false);
     expect(await readdir(plan.sessionsDir)).toEqual([]);
@@ -506,7 +530,7 @@ describe('materializeStart', () => {
     await writeFile(join(plan.extensionsDir, 'stale.ts'), 'old', 'utf8');
     await writeFile(join(plan.sessionsDir, 'session.jsonl'), '{}', 'utf8');
     await materializeStart(plan);
-    expect(await readdir(plan.extensionsDir)).toEqual(['providers.ts']);
+    expect((await readdir(plan.extensionsDir)).sort()).toEqual([agentBrowserNonoFallbackFile, 'providers.ts'].sort());
     expect(await readFile(join(plan.sessionsDir, 'session.jsonl'), 'utf8')).toBe('{}');
   });
 
@@ -515,19 +539,26 @@ describe('materializeStart', () => {
     const plan = await planStart({ dir: agentDir }, deps);
     await materializeStart(plan);
     await materializeStart(plan);
-    expect(await readdir(plan.extensionsDir)).toEqual(['providers.ts']);
+    expect((await readdir(plan.extensionsDir)).sort()).toEqual([agentBrowserNonoFallbackFile, 'providers.ts'].sort());
   });
 
   it('should write the generated per-agent profile into the state dir on a sandboxed run', async () => {
-    await addFile('sandbox/nono.json', JSON.stringify({ filesystem: { allow: ['~/.agent-browser'] } }));
+    await addFile(
+      'sandbox/nono.json',
+      JSON.stringify({
+        filesystem: {
+          allow: ['~/.agent-browser'],
+          unix_socket_dir_bind: ['~/.agent-browser']
+        }
+      })
+    );
     const plan = await planStart({ dir: agentDir }, deps);
     await materializeStart(plan);
     const stateDir = stateDirFor(agentDir, '/home/u');
     const written = JSON.parse(await readFile(join(stateDir, 'nono-profile.json'), 'utf8'));
     expect(written.extends).toBe('default');
-    // The agent's own grant made it into the generated profile, home-expanded.
     expect(written.filesystem.allow).toContain('/home/u/.agent-browser');
-    // …alongside this run's cwd + state dir.
+    expect(written.filesystem.unix_socket_dir_bind).toEqual(['/home/u/.agent-browser']);
     expect(written.filesystem.allow).toEqual(expect.arrayContaining(['/work', stateDir]));
   });
 
@@ -535,7 +566,7 @@ describe('materializeStart', () => {
     const which = createWhichStub({ pi: '/shims/pi' });
     const plan = await planStart({ dir: agentDir, noSandbox: true }, { ...deps, which });
     await materializeStart(plan);
-    // materializeStart created the state dir (extensions + sessions) but no profile.
+    // materializeStart created the state and sessions dirs but no profile.
     expect(await readdir(stateDirFor(agentDir, '/home/u'))).not.toContain('nono-profile.json');
   });
 
@@ -556,9 +587,12 @@ describe('materializeStart', () => {
     const overridden = { ...plan, extensionsDir: overriddenExtensionsDir, sessionsDir: overriddenSessionsDir };
     const result = await materializeStart(overridden);
     // Files land in the overridden dirs (materializeStart writes to plan.extensionsDir directly)...
-    expect(await readdir(overriddenExtensionsDir)).toEqual(['providers.ts']);
+    expect((await readdir(overriddenExtensionsDir)).sort()).toEqual(
+      [agentBrowserNonoFallbackFile, 'providers.ts'].sort()
+    );
     // ...and the composed argv agrees, rather than pointing at the plan's original dirs.
     expect(result.argv).toContain(join(overriddenExtensionsDir, 'providers.ts'));
+    expect(result.argv).toContain(join(overriddenExtensionsDir, agentBrowserNonoFallbackFile));
     expect(result.argv[result.argv.indexOf('--session-dir') + 1]).toBe(overriddenSessionsDir);
     expect(result.argv).not.toContain(join(plan.extensionsDir, 'providers.ts'));
     expect(result.argv).not.toContain(plan.sessionsDir);

@@ -114,13 +114,13 @@ Outbound network is **open by default within a sandboxed run**. A `network` bloc
 }
 ```
 
-| Key               | Effect                                                                                          |
-| ----------------- | ----------------------------------------------------------------------------------------------- |
-| `block`           | `true` denies **all** outbound (full offline).                                                  |
-| `allow_domain`    | Host allowlist. **Presence flips nono to default-deny** — unlisted hosts are refused (403).     |
-| `open_port`       | localhost TCP ports the agent may connect/bind (e.g. a local model or dev server).              |
-| `listen_port`     | TCP ports the agent may listen on.                                                              |
-| `network_profile` | Named nono network-policy profile (opaque pass-through; requires a host `network-policy.json`). |
+| Key               | Effect                                                                                           |
+| ----------------- | ------------------------------------------------------------------------------------------------ |
+| `block`           | `true` denies **all** outbound (full offline).                                                   |
+| `allow_domain`    | Host allowlist. **Presence flips nono to default-deny** — unlisted hosts are refused (403).      |
+| `open_port`       | localhost TCP ports the agent may connect/bind; `0` allows any outbound localhost port on macOS. |
+| `listen_port`     | TCP ports the agent may listen on.                                                               |
+| `network_profile` | Named nono network-policy profile (opaque pass-through; requires a host `network-policy.json`).  |
 
 An `allow_domain` allowlist blocks localhost too, so a local-model agent must list `localhost`/`127.0.0.1` **and** open its port (see [`examples/hello`](../../examples/hello), locked to Ollama on `localhost:11434`). CLI flags override the folder: `--offline` (full block) and repeatable `--allow-host <host>` (allowlist). Precedence: `--offline` > `--allow-host` > `sandbox/nono.json` > open. Requesting a network policy only means something inside the sandbox, so `--offline`/`--allow-host` force the sandbox on (same as `--sandbox`) unless `--no-sandbox` is passed explicitly, in which case cradle warns `network policy has no effect without the sandbox — pi runs with no network isolation (--sandbox to enforce it)` and nothing is enforced. cradle doesn't echo the resolved posture itself — run with `--verbose` to drop nono's `--silent` flag and see its own capabilities banner (grants + network mode), or read the generated per-agent profile (`nono-profile.json` in the agent's state dir). nono **fails closed** — a malformed `network` key or a platform that can't enforce proxy filtering makes the run refuse to start rather than silently ship an unenforced allowlist.
 
@@ -128,33 +128,32 @@ An `allow_domain` allowlist blocks localhost too, so a local-model agent must li
 
 Some tools need OS capabilities the conservative base profile denies. `sandbox/nono.json` can append raw macOS Seatbelt rules — s-expressions merged verbatim after the base's rules (nono validates the syntax at load). Each one widens the OS sandbox, so audit them where they live: the folder's `sandbox/nono.json` or the generated per-agent profile (`nono-profile.json` in the agent's state dir) — nono's own capabilities banner (shown with `--verbose`) never lists seatbelt rules. Ignored on Linux.
 
-**Browser automation is the motivating case.** [agent-browser](https://agent-browser.dev/) + Chrome for Testing runs sandboxed under nono with exactly two rules plus Chrome's own `--no-sandbox` flag:
+**Browser automation is the motivating case.** [agent-browser](https://agent-browser.dev/) + Chrome for Testing runs sandboxed under nono with a directory grant, a direct-child Unix socket grant, exactly two macOS rules, and Chrome's own `--no-sandbox` flag:
 
 ```json
 {
   "filesystem": {
-    "allow": ["~/.agent-browser"]
+    "allow": ["~/.agent-browser"],
+    "unix_socket_dir_bind": ["~/.agent-browser"]
+  },
+  "network": {
+    "open_port": [0]
   },
   "unsafe_macos_seatbelt_rules": ["(allow mach-register)", "(allow iokit-open)"]
 }
 ```
 
-| Entry                    | Why it's needed                                                                                                                                               |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `allow ~/.agent-browser` | agent-browser's own state dir — daemon socket, downloaded Chrome, config. Without it the daemon can't create its socket (`Operation not permitted`).          |
-| `(allow mach-register)`  | Chrome's Crashpad handler registers a Mach service (`bootstrap_check_in org.chromium.crashpad.*`); the base profile denies it, so the browser process aborts. |
-| `(allow iokit-open)`     | Chrome opens IOKit user clients during startup even headless; without it the browser process crashes before serving CDP.                                      |
+| Entry                                   | Why it's needed                                                                                                                                               |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `allow ~/.agent-browser`                | agent-browser's state dir — downloaded Chrome, config, and daemon socket files.                                                                               |
+| `unix_socket_dir_bind ~/.agent-browser` | Lets the CLI and daemon connect to and bind direct-child Unix sockets; without it, `connect()` returns `EPERM`.                                               |
+| `open_port 0`                           | Lets the daemon connect to Chrome's random localhost DevTools port on macOS; without it, the CDP WebSocket returns `EPERM`.                                   |
+| `(allow mach-register)`                 | Chrome's Crashpad handler registers a Mach service (`bootstrap_check_in org.chromium.crashpad.*`); the base profile denies it, so the browser process aborts. |
+| `(allow iokit-open)`                    | Chrome opens IOKit user clients during startup even headless; without it the browser process crashes before serving CDP.                                      |
 
-The two rules are IPC/IOKit capabilities only — the filesystem and network boundaries stay intact, so the sandbox still denies an ungranted path (verified: a granted read succeeds, `~/some-secret` returns `Operation not permitted`). No grant for Chrome's own `~/Library/…/Chrome for Testing` dir is needed — its Crashpad-database `stat` failure under the sandbox is non-fatal noise.
+`unix_socket_dir_bind` is non-recursive. Point it only at a dedicated socket directory, never a broad parent such as `~` or `/tmp`. Port `0` is nono's macOS-only outbound localhost wildcard; Linux requires explicit ports. The two macOS rules are IPC/IOKit capabilities only — the filesystem and network boundaries stay intact, so the sandbox still denies an ungranted path (verified: a granted read succeeds, `~/some-secret` returns `Operation not permitted`). No grant for Chrome's own `~/Library/…/Chrome for Testing` dir is needed — its Crashpad-database `stat` failure under the sandbox is non-fatal noise.
 
-Chrome's **own** nested sandbox can't initialize inside nono's seatbelt (macOS forbids nesting), so its child processes need `--no-sandbox`. Deliver it through a pi extension rather than a shell env var — an extension travels with the agent folder and pi propagates it into every tool's env regardless of how the extension itself set it. The simplest is a one-line agent extension:
-
-```ts
-// extensions/browser-sandbox.ts — set the flag before agent-browser launches Chrome
-process.env.AGENT_BROWSER_ARGS ??= '--no-sandbox';
-```
-
-(Or pass `agent-browser --args --no-sandbox` on each call.) See [`examples/browser`](../../examples/browser) for the complete folder.
+Chrome's **own** nested sandbox can't initialize inside nono's seatbelt (macOS forbids nesting), so its child processes need `--no-sandbox`. On every sandboxed run, cradle generates and loads `agent-browser-nono-fallback.ts` before package and agent extensions. On macOS it appends `--no-sandbox` to `AGENT_BROWSER_ARGS`; on every platform it maps nono's dynamically injected `HTTPS_PROXY`/`HTTP_PROXY` to `AGENT_BROWSER_PROXY`. Explicit agent-browser proxy configuration still wins. Unsandboxed runs do not load the fallback, so Chrome keeps its own sandbox. See [`examples/browser`](../../examples/browser) for the complete folder.
 
 An agent that still cannot run sandboxed can declare `{ "sandbox": false }` instead. cradle then runs pi bare, warns loudly on every run, and an explicit `--sandbox` flag always forces isolation back on.
 

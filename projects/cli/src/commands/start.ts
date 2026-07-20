@@ -8,6 +8,10 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { resolveAgentRef } from '../agent/aliases.js';
+import {
+  AGENT_BROWSER_NONO_FALLBACK_EXTENSION_FILE,
+  emitAgentBrowserNonoFallbackExtension
+} from '../agent/extensions/agent-browser-nono-fallback.js';
 import { emitProvidersExtension } from '../agent/extensions/providers.js';
 import { loadAgentFolder, type AgentFolder, type AgentNetwork } from '../agent/folder.js';
 import { composeArgv, type LaunchSpec } from '../agent/launch.js';
@@ -112,7 +116,7 @@ export async function planStart(flags: StartFlags, deps: StartDeps = {}): Promis
     miseCacheDir,
     ...(deps.which !== undefined ? { which: deps.which } : {})
   });
-  const files = emitExtensionFiles(folder);
+  const files = emitExtensionFiles(folder, sandbox);
   const linkedGitDir = sandbox ? await resolveLinkedGitDir(cwd) : undefined;
   const profile = sandboxPlan(sandbox, folder, network, {
     home,
@@ -389,7 +393,18 @@ function sandboxPlan(
   return { path: ctx.profilePath, content };
 }
 
-function emitExtensionFiles(folder: AgentFolder): TreeFile[] {
-  if (folder.providersJson === null) return [];
-  return [{ rel: 'providers.ts', content: emitProvidersExtension(folder.providersJson) }];
+function emitExtensionFiles(folder: AgentFolder, sandbox: boolean): TreeFile[] {
+  return [
+    ...(folder.providersJson !== null
+      ? [{ rel: 'providers.ts', content: emitProvidersExtension(folder.providersJson) }]
+      : []),
+    ...(sandbox
+      ? [
+          {
+            rel: AGENT_BROWSER_NONO_FALLBACK_EXTENSION_FILE,
+            content: emitAgentBrowserNonoFallbackExtension()
+          }
+        ]
+      : [])
+  ];
 }

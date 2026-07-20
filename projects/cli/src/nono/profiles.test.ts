@@ -18,7 +18,7 @@ function spec(overrides: Partial<ProfileSpec> = {}): ProfileSpec {
     cwd: '/work/project',
     agentDir: '/agents/helper',
     stateDir: '/home/u/.cradle/agents/helper-1a2b3c4d',
-    grants: { read: [], write: [], allow: [] },
+    grants: { read: [], write: [], allow: [], unixSocketDirBind: [] },
     rules: [],
     ...overrides
   };
@@ -106,10 +106,22 @@ describe('buildProfileJson', () => {
   });
 
   it('folds the agent’s sandbox/nono.json grants in, expanding ~ and $HOME', () => {
-    const profile = build({ grants: { read: ['~/data', '/etc/certs'], write: ['$HOME/out'], allow: ['~/scratch'] } });
+    const profile = build({
+      grants: {
+        read: ['~/data', '/etc/certs'],
+        write: ['$HOME/out'],
+        allow: ['~/scratch'],
+        unixSocketDirBind: ['~/.agent-browser']
+      }
+    });
     expect(profile.filesystem.read).toEqual(expect.arrayContaining(['/home/u/data', '/etc/certs']));
     expect(profile.filesystem.write).toEqual(['/home/u/out']);
     expect(profile.filesystem.allow).toContain('/home/u/scratch');
+    expect(profile.filesystem.unix_socket_dir_bind).toEqual(['/home/u/.agent-browser']);
+  });
+
+  it('omits Unix socket grants when the agent supplies none', () => {
+    expect(build().filesystem.unix_socket_dir_bind).toBeUndefined();
   });
 
   it('appends the agent’s seatbelt rules after the base rules (Seatbelt is last-match-wins)', () => {
@@ -139,7 +151,7 @@ describe('buildProfileJson', () => {
         block: false,
         networkProfile: 'developer',
         allowDomain: ['api.z.ai', 'localhost'],
-        openPort: [11434],
+        openPort: [0, 11434],
         listenPort: [8080]
       }
     });
@@ -147,7 +159,7 @@ describe('buildProfileJson', () => {
       block: false,
       network_profile: 'developer',
       allow_domain: ['api.z.ai', 'localhost'],
-      open_port: [11434],
+      open_port: [0, 11434],
       listen_port: [8080]
     });
   });

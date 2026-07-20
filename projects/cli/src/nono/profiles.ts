@@ -64,6 +64,7 @@ type BaseFilesystem = {
   readonly read?: readonly string[];
   readonly write?: readonly string[];
   readonly allow?: readonly string[];
+  readonly unix_socket_dir_bind?: readonly string[];
 };
 
 /**
@@ -71,7 +72,7 @@ type BaseFilesystem = {
  * `extends default`, pulls the `node_runtime` group, and grants mise/pi/say
  * paths) merged with this run's grants — the target cwd, the agent folder, the
  * state dir, the linked git dir when cwd is a worktree/submodule checkout, and
- * the agent's own `sandbox/nono.json` entries. Regenerated every run into the
+ * the agent's own path and direct-child Unix socket grants from `sandbox/nono.json`. Regenerated every run into the
  * state dir, so there is no shared global profile: each agent's permissions
  * are fully described by its own directory.
  *
@@ -93,6 +94,7 @@ export function buildProfileJson(spec: ProfileSpec): string {
   const expand = (path: string): string => expandHome(path, spec.home);
   const baseFs: BaseFilesystem = cradlePiProfile.filesystem;
   const network = spec.network !== undefined ? toNonoNetwork(spec.network) : undefined;
+  const unixSocketDirBind = [...(baseFs.unix_socket_dir_bind ?? []), ...spec.grants.unixSocketDirBind.map(expand)];
   const profile = {
     ...cradlePiProfile,
     meta: { ...cradlePiProfile.meta, name: `cradle-${basename(spec.stateDir)}` },
@@ -106,7 +108,8 @@ export function buildProfileJson(spec: ProfileSpec): string {
         spec.stateDir,
         ...(spec.linkedGitDir !== undefined ? [spec.linkedGitDir] : []),
         ...spec.grants.allow.map(expand)
-      ]
+      ],
+      ...(unixSocketDirBind.length > 0 ? { unix_socket_dir_bind: unixSocketDirBind } : {})
     },
     unsafe_macos_seatbelt_rules: [...(cradlePiProfile.unsafe_macos_seatbelt_rules ?? []), ...spec.rules],
     ...(network !== undefined ? { network } : {})
