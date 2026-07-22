@@ -2,7 +2,13 @@ node_modules
 projects/**/dist
 projects/**/.wireit
 projects/**/.coverage
-projects/**/CHANGELOG.md
+.wireit/
+.eslintcache/
+pnpm-lock.yaml
+mise.lock
 bun.lock
 *.bun-build
-.claude/settings.local.json
+LICENSE
+projects/docs/src/**/*.md
+projects/tools/src/vale/styles/
+**/CHANGELOG.md

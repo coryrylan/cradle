@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach } from 'bun:test';
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { killOn, runForeground, runInstall } from './proc.js';
+import { killOn, runCapture, runForeground, runInstall } from './proc.js';
 
 describe('killOn', () => {
   it('returns a handler that forwards the signal to the process', () => {
@@ -46,6 +46,24 @@ describe('runForeground', () => {
       delete process.env['CRADLE_RUNFOREGROUND_TEST'];
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('runCapture', () => {
+  it('throws when given no command', async () => {
+    await expect(runCapture([])).rejects.toThrow(/at least one argument/);
+  });
+
+  it('captures stderr and the exit code without throwing on a non-zero exit', async () => {
+    const result = await runCapture(['sh', '-c', 'echo boom >&2; exit 3']);
+    expect(result.exitCode).toBe(3);
+    expect(result.stderr).toContain('boom');
+  });
+
+  it('resolves with a zero exit code and empty stderr on success', async () => {
+    const result = await runCapture(['true']);
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe('');
   });
 });
 

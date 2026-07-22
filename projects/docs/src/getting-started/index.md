@@ -12,11 +12,12 @@
 
 ## Dependencies
 
-| Tool                                              | Status      | Why                                                                                                                                                                                              |
-| ------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`pi`](https://github.com/earendil-works/pi-mono) | Required    | The coding agent cradle launches. Every `cradle start` spawns it.                                                                                                                                |
-| [`nono`](https://github.com/always-further/nono)  | Recommended | The filesystem sandbox pi runs inside for a sandboxed run — a folder declaring `sandbox/nono.json`, or `--sandbox`/`--offline`/`--allow-host`. Required for that run, not needed otherwise.      |
-| [`mise`](https://mise.jdx.dev)                    | Recommended | The supported way to install and manage `pi` and `nono`. cradle resolves both through mise's shims, and the generated sandbox profile grants mise's trees so a sandboxed `pi` finds its runtime. |
+| Tool                                              | Status      | Why                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`pi`](https://github.com/earendil-works/pi-mono) | Required    | The coding agent cradle launches. Every `cradle start` spawns it.                                                                                                                                                                                                                   |
+| [`nono`](https://github.com/always-further/nono)  | Recommended | The filesystem sandbox pi runs inside for a nono-backend run — a folder declaring `sandbox/nono.json`, or `--sandbox`/`--sandbox-backend nono`/`--offline`/`--allow-host`. Required for that run, not needed otherwise.                                                             |
+| [`sbx`](https://docs.docker.com/ai/sandboxes/)    | Recommended | The Docker Sandboxes microVM pi runs inside for an sbx-backend run — a folder declaring `sandbox/sbx.json`, or `--sandbox-backend sbx`. Required for that run, not needed otherwise. Install via `brew install docker/tap/sbx`; one-time setup: `sbx login` then `sbx policy init`. |
+| [`mise`](https://mise.jdx.dev)                    | Recommended | The supported way to install and manage `pi` and `nono`. cradle resolves both through mise's shims, and the generated sandbox profile grants mise's trees so a sandboxed `pi` finds its runtime.                                                                                    |
 
 ## Install cradle
 
@@ -40,7 +41,7 @@ Run `cradle doctor` to confirm what's on your `PATH`:
 cradle doctor
 ```
 
-It reports each tool's resolved path and version. Only `pi` is required. `nono` is required only for a sandboxed run — a folder declaring `sandbox/nono.json`, or `--sandbox`/`--offline`/`--allow-host` on the command line; `mise` is recommended.
+It reports each tool's resolved path and version. Only `pi` is required. `nono`/`sbx` are each required only for a run on their backend — a folder declaring `sandbox/nono.json`/`sandbox/sbx.json`, or `--sandbox`/`--sandbox-backend`/`--offline`/`--allow-host` on the command line; `mise` is recommended.
 
 ## Create your first agent
 
@@ -69,7 +70,7 @@ That's a complete agent. Everything else — model selection, skills, extensions
 cradle start ~/dev/agents/my-agent
 ```
 
-`cradle` runs `pi` configured from that folder in your current working directory — not inside the agent folder. Add `sandbox/nono.json` to run it sandboxed by `nono`; otherwise cradle warns and runs bare `pi`. The agent folder is just a parameter; your project stays the target.
+`cradle` runs `pi` configured from that folder in your current working directory — not inside the agent folder. Add `sandbox/nono.json` to run it sandboxed by `nono`, or `sandbox/sbx.json` to run it inside the `sbx` Docker Sandboxes microVM instead; otherwise cradle warns and runs bare `pi`. The agent folder is just a parameter; your project stays the target.
 
 To preview what would happen without spawning anything:
 

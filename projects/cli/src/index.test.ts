@@ -73,7 +73,7 @@ describe('start command', () => {
     const { stdout, stderr, exitCode } = await runCli(['start', agentDir, '--dry-run'], env);
     expect(stdout.trim().split('\n').at(-1)?.startsWith('pi --append-system-prompt')).toBe(true);
     expect(stdout).not.toContain('agent-browser-nono-fallback.ts');
-    expect(stderr).toContain('sandbox/nono.json not found');
+    expect(stderr).toContain('sandbox/nono.json or sbx.json not found');
     expect(exitCode).toBe(0);
   });
 
@@ -144,7 +144,7 @@ describe('start command', () => {
 
   it('bakes --allow-host into the network allowlist via the generated profile', async () => {
     const { stdout, exitCode } = await runCli(
-      ['start', agentDir, '--dry-run', '--allow-host', 'api.z.ai', '--allow-host', 'localhost'],
+      ['start', agentDir, '--dry-run', '--allow-host', 'api.example.com', '--allow-host', 'localhost'],
       env
     );
     // Network policy is disclosed by nono's startup banner, not echoed by cradle.

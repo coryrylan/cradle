@@ -43,7 +43,7 @@ export default {
       '@semantic-release/exec',
       {
         prepareCmd: 'bun pm pkg set version=${nextRelease.version} && bun pm pack',
-        publishCmd: `npm publish ./*.tgz --provenance --registry=https://registry.npmjs.org ${DRY_RUN ? '--dry-run' : ''} --access=public`
+        publishCmd: `npm publish ./*.tgz --registry=https://registry.npmjs.org ${DRY_RUN ? '--dry-run' : ''} --access=public`
       }
     ],
     [

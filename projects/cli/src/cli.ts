@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 
 import yargs from 'yargs';
 
@@ -8,9 +8,10 @@ import pkg from '../package.json' with { type: 'json' };
 import { composeArgv, composeEnv } from './agent/launch.js';
 import { doctorExitCode, formatDoctorReport, runDoctor } from './commands/doctor.js';
 import { materializeStart, planStart, type StartFlags, type StartPlan } from './commands/start.js';
+import { composeSbxExecArgv } from './sbx/compose.js';
 import { quoteCommandPart } from './setup/utils.js';
 import { styleWarning } from './util/style.js';
-import { runForeground, runInstall } from './util/proc.js';
+import { runCapture, runForeground, runInstall } from './util/proc.js';
 
 const cli = yargs(process.argv.slice(2))
   .scriptName('cradle')
@@ -33,7 +34,7 @@ cli.command(
 
 cli.command(
   'start [dir]',
-  'run an agent folder with pi, sandboxed when sandbox/nono.json is present',
+  'run an agent folder with pi, sandboxed when sandbox/nono.json or sandbox/sbx.json is present',
   builder =>
     builder
       .positional('dir', {
@@ -53,7 +54,13 @@ cli.command(
       .option('sandbox', {
         type: 'boolean',
         description:
-          'run inside nono (--sandbox forces it when sandbox/nono.json is absent or opts out; --no-sandbox disables)'
+          'run sandboxed (--sandbox forces it when no sandbox/ file enables one or the folder opts out; --no-sandbox disables)'
+      })
+      .option('sandbox-backend', {
+        type: 'string',
+        choices: ['nono', 'sbx'] as const,
+        description:
+          'sandbox implementation (implies --sandbox): nono (host OS policy) or sbx (Docker Sandboxes microVM)'
       })
       .option('verbose', {
         type: 'boolean',
@@ -73,6 +80,7 @@ cli.command(
       dir: argv.dir,
       dryRun: argv.dryRun,
       ...(argv.sandbox !== undefined ? { noSandbox: !argv.sandbox } : {}),
+      ...(argv.sandboxBackend !== undefined ? { sandboxBackend: argv.sandboxBackend } : {}),
       ...(argv.offline ? { offline: true } : {}),
       ...(allowHost.length ? { allowHost } : {}),
       ...(argv.verbose ? { verbose: true } : {}),
@@ -97,15 +105,20 @@ cli.command(
 // yargs handler would print the full usage dump plus a stack trace instead.
 async function runStart(flags: StartFlags): Promise<void> {
   try {
-    const plan = await planStart(flags);
+    const plan = await planStart(flags, { tty: process.stdout.isTTY === true });
     printWarnings(plan.warnings);
     if (plan.dryRun) {
       printDryRun(plan);
       return;
     }
-    const result = await materializeStart(plan, { install: runInstall });
+    const result = await materializeStart(plan, {
+      install: runInstall,
+      run: runCapture,
+      readPiVersion: readBinVersion
+    });
     printWarnings(result.warnings);
     if (plan.profile !== null && !flags.verbose) console.log('🔒 Sandbox Active');
+    if (plan.sbx !== null && !flags.verbose) console.log('🔒 Sandbox Active (sbx)');
     process.exit(await runForeground(result.argv, composeEnv(plan.launch)));
   } catch (err) {
     reportError(err);
@@ -115,12 +128,25 @@ async function runStart(flags: StartFlags): Promise<void> {
 function printDryRun(plan: StartPlan): void {
   for (const file of plan.files) console.log(`write: ${join(plan.extensionsDir, file.rel)}`);
   if (plan.profile !== null) console.log(`write: ${plan.profile.path}`);
+  if (plan.sbx !== null) printSbxPlan(plan.sbx);
   if (plan.packages !== null) printPackagesPlan(plan.packages);
   // The dry-run print is an audit surface, so it must disclose the spawn env
   // too (cradle's one env-var exception, see `agent/launch.ts`'s `composeEnv`)
   // — not just the argv.
   const envPrefix = Object.entries(composeEnv(plan.launch)).map(([key, value]) => `${key}=${quoteCommandPart(value)}`);
-  console.log([...envPrefix, ...composeArgv(plan.launch).map(quoteCommandPart)].join(' '));
+  const argv =
+    plan.sbx !== null ? composeSbxExecArgv(plan.sbx.spec, composeArgv(plan.launch)) : composeArgv(plan.launch);
+  console.log([...envPrefix, ...argv.map(quoteCommandPart)].join(' '));
+}
+
+// The sbx setup sequence is part of the audit surface too — every command
+// materialize will run, in order. Provision prints unpinned; materialize
+// re-pins it to the host pi version (same precedent as the package `-e`
+// entries below, which also resolve after the preview prints).
+function printSbxPlan(sbx: NonNullable<StartPlan['sbx']>): void {
+  console.log(`create: ${sbx.createArgv.map(quoteCommandPart).join(' ')}`);
+  for (const argv of sbx.policyArgvs) console.log(`policy: ${argv.map(quoteCommandPart).join(' ')}`);
+  console.log(`provision: ${sbx.provisionArgv.map(quoteCommandPart).join(' ')}`);
 }
 
 // Dry-run never installs; the printed argv legitimately omits the package `-e`
@@ -137,20 +163,19 @@ function printWarnings(warnings: readonly string[]): void {
 }
 
 /**
- * Read a bin's `--version` output, normalized to a bare version string. `nono`
- * prints `nono 0.68.0`; `pi` prints a bare `0.80.7` — strip a leading
- * `<bin name> ` prefix when present so both report the same shape. Returns
- * `null` on spawn failure.
+ * Read a bin's version output, normalized to a bare version string. Bins
+ * report differently — `pi` prints a bare `0.80.10`, `nono` prints
+ * `nono 0.68.0`, and `sbx` (no `--version` flag at all; callers pass
+ * `['version']`) prints `sbx version: v0.35.0 <sha>` — so extract the first
+ * version-shaped token from the first line rather than assuming a prefix.
+ * Returns `null` on spawn failure, non-zero exit, or no match.
  */
-async function readBinVersion(binPath: string): Promise<string | null> {
+async function readBinVersion(binPath: string, args: readonly string[] = ['--version']): Promise<string | null> {
   try {
-    const proc = Bun.spawn([binPath, '--version'], { stdout: 'pipe', stderr: 'ignore' });
+    const proc = Bun.spawn([binPath, ...args], { stdout: 'pipe', stderr: 'ignore' });
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     if (exitCode !== 0) return null;
-    const firstLine = stdout.split('\n')[0]?.trim();
-    if (!firstLine) return null;
-    const prefix = `${basename(binPath)} `;
-    return firstLine.startsWith(prefix) ? firstLine.slice(prefix.length) : firstLine;
+    return stdout.split('\n')[0]?.match(/v?\d+\.\d+\S*/)?.[0] ?? null;
   } catch {
     return null;
   }

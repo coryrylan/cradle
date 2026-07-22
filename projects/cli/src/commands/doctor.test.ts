@@ -2,24 +2,37 @@ import { describe, it, expect } from 'bun:test';
 import { createWhichStub } from '../util/which.js';
 import { doctorExitCode, formatDoctorReport, runDoctor } from './doctor.js';
 
-const allFound = { pi: '/shims/pi', nono: '/shims/nono', mise: '/shims/mise' };
+const allFound = { pi: '/shims/pi', nono: '/shims/nono', sbx: '/shims/sbx', mise: '/shims/mise' };
 
 describe('runDoctor', () => {
-  it('should require pi and recommend nono and mise', async () => {
+  it('should require pi and recommend nono, sbx, and mise', async () => {
     const checks = await runDoctor({ which: createWhichStub({}) });
-    expect(checks.map(check => check.name)).toEqual(['pi', 'nono', 'mise']);
+    expect(checks.map(check => check.name)).toEqual(['pi', 'nono', 'sbx', 'mise']);
     expect(checks.find(check => check.name === 'pi')?.required).toBe(true);
     expect(checks.find(check => check.name === 'nono')?.required).toBe(false);
+    expect(checks.find(check => check.name === 'sbx')?.required).toBe(false);
     expect(checks.find(check => check.name === 'mise')?.required).toBe(false);
   });
 
   it('should attach a not-required note to missing optional tools', async () => {
     const missing = await runDoctor({ which: createWhichStub({ pi: '/p' }) });
     expect(missing.find(check => check.name === 'nono')?.note).toContain('required for sandboxed runs');
+    expect(missing.find(check => check.name === 'sbx')?.note).toContain('required for sbx-backend runs');
     expect(missing.find(check => check.name === 'mise')?.note).toContain('recommended');
     const present = await runDoctor({ which: createWhichStub(allFound) });
     expect(present.find(check => check.name === 'nono')?.note).toBeUndefined();
+    expect(present.find(check => check.name === 'sbx')?.note).toBeUndefined();
     expect(present.find(check => check.name === 'mise')?.note).toBeUndefined();
+  });
+
+  it('should ask for the sbx version via its version subcommand, and the default flag for the rest', async () => {
+    const calls: (readonly string[] | undefined)[] = [];
+    const readVersion = async (_binPath: string, args?: readonly string[]): Promise<string | null> => {
+      calls.push(args);
+      return '1.0.0';
+    };
+    await runDoctor({ which: createWhichStub(allFound), readVersion });
+    expect(calls).toEqual([undefined, undefined, ['version'], undefined]);
   });
 
   it('should report resolved paths for found bins', async () => {

@@ -2,13 +2,14 @@
 
 ![CI Build](https://github.com/coryrylan/cradle/actions/workflows/pull-request.yml/badge.svg)
 
-**A runtime for portable agents defined as folders.** An agent is a directory: a `SYSTEM.md` or `APPEND_SYSTEM.md` plus optional model config, skills, extensions, and sandbox posture. `cradle start <dir>` reads the folder and launches the [pi](https://github.com/earendil-works/pi-mono) coding agent configured from it — wrapped in the [nono](https://github.com/always-further/nono) filesystem/network sandbox when the folder declares one. Think of cradle as a pi agent switcher: one pi install, many agents, each described entirely by its own directory.
+**A runtime for portable agents defined as folders.** An agent is a directory: a `SYSTEM.md` or `APPEND_SYSTEM.md` plus optional model config, skills, extensions, and sandbox posture. `cradle start <dir>` reads the folder and launches the [pi](https://github.com/earendil-works/pi-mono) coding agent configured from it — sandboxed when the folder declares a posture, with a choice of backend: [nono](https://github.com/always-further/nono) (host OS policy) or [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (`sbx`, a microVM). Think of cradle as a pi agent switcher: one pi install, many agents, each described entirely by its own directory.
 
 The folder is static, portable, and committable; runtime state (generated extensions, session history, the generated sandbox profile) lives outside it under `~/.cradle/`. An agent folder is code — extensions run with the pi process's permissions — so treat a third-party folder like any repo you'd run.
 
 ```sh
-cradle doctor              # check pi (required), nono/mise (recommended) on PATH
-cradle start ./my-agent    # launch pi as this agent; sandboxed when sandbox/nono.json exists
+cradle doctor              # check pi (required), nono/sbx/mise (recommended) on PATH
+cradle start ./my-agent    # launch pi as this agent; sandboxed when sandbox/nono.json or sandbox/sbx.json exists
+cradle start ./my-agent --sandbox-backend sbx   # run in a Docker Sandboxes microVM instead of nono
 cradle start ./my-agent --offline       # block all outbound network
 cradle start ./my-agent --dry-run       # print the write plan + command, do not spawn
 cradle start ./my-agent -- -p "prompt"  # everything after -- is forwarded to pi
@@ -40,7 +41,7 @@ my-agent/
   models.json        optional   pi-native custom provider definitions
   skills/            optional   markdown playbooks, loaded when relevant
   extensions/        optional   pi extensions: custom tools, commands, hooks
-  sandbox/           optional   sandbox posture (nono.json)
+  sandbox/           optional   sandbox posture (nono.json, sbx.json)
 ```
 
 `*` At least one of `SYSTEM.md` (replaces pi's default prompt) / `APPEND_SYSTEM.md` (appends to it) is required; a folder may ship both. Every supported file uses a pi-native or cross-tool-standard name, mirroring pi's own `~/.pi/agent/` layout — anything written for a personal pi config drops in unchanged. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full folder-format spec and [`examples/`](./examples) for runnable agents:

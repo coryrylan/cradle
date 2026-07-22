@@ -150,7 +150,7 @@ describe('buildProfileJson', () => {
       network: {
         block: false,
         networkProfile: 'developer',
-        allowDomain: ['api.z.ai', 'localhost'],
+        allowDomain: ['api.example.com', 'localhost'],
         openPort: [0, 11434],
         listenPort: [8080]
       }
@@ -158,7 +158,7 @@ describe('buildProfileJson', () => {
     expect(profile.network).toEqual({
       block: false,
       network_profile: 'developer',
-      allow_domain: ['api.z.ai', 'localhost'],
+      allow_domain: ['api.example.com', 'localhost'],
       open_port: [0, 11434],
       listen_port: [8080]
     });

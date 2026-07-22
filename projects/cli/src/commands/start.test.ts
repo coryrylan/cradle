@@ -60,7 +60,7 @@ describe('planStart', () => {
     expect(composeArgv(plan.launch)[0]).toBe('/shims/pi');
     expect(plan.profile).toBeNull();
     expect(relFiles(plan)).toEqual([]);
-    expect(plan.warnings.join('\n')).toContain('sandbox/nono.json not found');
+    expect(plan.warnings.join('\n')).toContain('sandbox/nono.json or sbx.json not found');
   });
 
   it('should omit --silent when verbose is true', async () => {
@@ -132,9 +132,9 @@ describe('planStart', () => {
     JSON.parse(plan.profile?.content ?? '{}').network;
 
   it('should bake the folder network block into the generated profile, canonical keys', async () => {
-    await addFile('sandbox/nono.json', JSON.stringify({ network: { allow_domain: ['api.z.ai'], open_port: [11434] } }));
+    await addFile('sandbox/nono.json', JSON.stringify({ network: { allow_domain: ['api.example.com'], open_port: [11434] } }));
     const plan = await planStart({ dir: agentDir }, deps);
-    expect(profileNetwork(plan)).toEqual({ allow_domain: ['api.z.ai'], open_port: [11434] });
+    expect(profileNetwork(plan)).toEqual({ allow_domain: ['api.example.com'], open_port: [11434] });
     // Network no longer rides as a flag.
     expect(composeArgv(plan.launch)).not.toContain('--block-net');
   });
@@ -149,10 +149,10 @@ describe('planStart', () => {
     // Folder wins with no flags.
     expect(profileNetwork(await planStart({ dir: agentDir }, deps))).toEqual({ allow_domain: ['folder.example'] });
     // --allow-host overrides the folder allowlist.
-    const allowHost = await planStart({ dir: agentDir, allowHost: ['api.z.ai', 'localhost'] }, deps);
-    expect(profileNetwork(allowHost)).toEqual({ allow_domain: ['api.z.ai', 'localhost'] });
+    const allowHost = await planStart({ dir: agentDir, allowHost: ['api.example.com', 'localhost'] }, deps);
+    expect(profileNetwork(allowHost)).toEqual({ allow_domain: ['api.example.com', 'localhost'] });
     // --offline overrides everything.
-    const offline = await planStart({ dir: agentDir, offline: true, allowHost: ['api.z.ai'] }, deps);
+    const offline = await planStart({ dir: agentDir, offline: true, allowHost: ['api.example.com'] }, deps);
     expect(profileNetwork(offline)).toEqual({ block: true });
   });
 
@@ -176,10 +176,10 @@ describe('planStart', () => {
   });
 
   it('should bake the network posture into the profile, disclosed by nono not cradle', async () => {
-    await addFile('sandbox/nono.json', JSON.stringify({ network: { allow_domain: ['api.z.ai', 'localhost'] } }));
+    await addFile('sandbox/nono.json', JSON.stringify({ network: { allow_domain: ['api.example.com', 'localhost'] } }));
     const sandboxed = await planStart({ dir: agentDir }, deps);
     expect(JSON.parse(sandboxed.profile?.content ?? '{}').network).toEqual({
-      allow_domain: ['api.z.ai', 'localhost']
+      allow_domain: ['api.example.com', 'localhost']
     });
     // Unsandboxed runs generate no profile.
     const bare = await planStart(
@@ -669,5 +669,189 @@ describe('planStart linked git dir', () => {
     const stateDir = stateDirFor(agentDir, '/home/u');
     const plan = await planStart({ dir: agentDir }, { ...deps, cwd: plainCwd });
     expect(JSON.parse(plan.profile?.content ?? '{}').filesystem.allow).toEqual(['$HOME/.pi/agent', plainCwd, stateDir]);
+  });
+});
+
+describe('sbx backend', () => {
+  const sbxDeps = { ...deps, which: createWhichStub({ pi: '/shims/pi', sbx: '/shims/sbx' }) };
+
+  beforeEach(async () => {
+    await rm(join(agentDir, 'sandbox'), { recursive: true });
+    await addFile('sandbox/sbx.json', '{}');
+  });
+
+  it('should resolve the sbx backend from sandbox/sbx.json alone, with no nono profile and no missing-file warning', async () => {
+    const plan = await planStart({ dir: agentDir }, sbxDeps);
+    expect(plan.launch.backend).toBe('sbx');
+    expect(plan.sbx).not.toBeNull();
+    expect(plan.profile).toBeNull();
+    expect(plan.warnings.join('\n')).not.toContain('not found');
+  });
+
+  it('should prefer nono when both files are enabled, warning about the tie-break', async () => {
+    await addFile('sandbox/nono.json', '{}');
+    const plan = await planStart(
+      { dir: agentDir },
+      { ...deps, which: createWhichStub({ ...allBins, sbx: '/shims/sbx' }) }
+    );
+    expect(plan.launch.backend).toBe('nono');
+    expect(plan.warnings.join('\n')).toContain('using nono (pass --sandbox-backend sbx to override)');
+  });
+
+  it('should let --sandbox-backend sbx override a nono-declaring folder, without the tie-break warning', async () => {
+    await addFile('sandbox/nono.json', '{}');
+    const plan = await planStart({ dir: agentDir, sandboxBackend: 'sbx' }, sbxDeps);
+    expect(plan.launch.backend).toBe('sbx');
+    expect(plan.profile).toBeNull();
+    expect(plan.sbx).not.toBeNull();
+    // The explicit flag resolves the tie itself — warning about it would be noise.
+    expect(plan.warnings.join('\n')).not.toContain('using nono');
+  });
+
+  it('should let --no-sandbox beat --sandbox-backend', async () => {
+    const plan = await planStart(
+      { dir: agentDir, sandboxBackend: 'sbx', noSandbox: true },
+      { ...sbxDeps, which: createWhichStub({ pi: '/shims/pi' }) }
+    );
+    expect(plan.launch.backend).toBeNull();
+    expect(plan.sbx).toBeNull();
+  });
+
+  it('should cite the sbx opt-out when sbx.json disables the sandbox', async () => {
+    await addFile('sandbox/sbx.json', JSON.stringify({ sandbox: false }));
+    const plan = await planStart({ dir: agentDir }, { ...deps, which: createWhichStub({ pi: '/shims/pi' }) });
+    expect(plan.launch.backend).toBeNull();
+    expect(plan.warnings.join('\n')).toContain('sandbox disabled by sandbox/sbx.json');
+  });
+
+  it('should force sbx on with --offline when only sbx.json is present, emitting the deny-all policy', async () => {
+    const plan = await planStart({ dir: agentDir, offline: true }, sbxDeps);
+    expect(plan.launch.backend).toBe('sbx');
+    expect(plan.sbx?.policyArgvs).toEqual([
+      ['/shims/sbx', 'policy', 'deny', 'network', '--sandbox', plan.sbx?.spec.name ?? '', '**']
+    ]);
+  });
+
+  it('should compose the mount set (cwd rw, agent dir ro, state dir rw, ~/.pi/agent rw) and a mount-hashed name', async () => {
+    const plan = await planStart({ dir: agentDir }, sbxDeps);
+    const stateDir = stateDirFor(agentDir, '/home/u');
+    expect(plan.sbx?.spec.mounts).toEqual([
+      { path: '/work', readonly: false },
+      { path: agentDir, readonly: true },
+      { path: stateDir, readonly: false },
+      { path: '/home/u/.pi/agent', readonly: false }
+    ]);
+    expect(plan.sbx?.spec.name).toMatch(/^cradle-my-agent-[0-9a-f]{8}-[0-9a-f]{8}$/);
+    expect(plan.sbx?.createArgv.slice(0, 3)).toEqual(['/shims/sbx', 'create', 'shell']);
+    expect(plan.sbx?.createArgv).toContain(`${agentDir}:ro`);
+  });
+
+  it('should compose the bare guest pi argv with no nono wrap and no agent-browser fallback', async () => {
+    const plan = await planStart({ dir: agentDir }, sbxDeps);
+    const argv = composeArgv(plan.launch);
+    expect(argv[0]).toBe('pi');
+    expect(argv).not.toContain('nono');
+    expect(relFiles(plan)).toEqual([]);
+  });
+
+  it('should surface the sbx allowlist-floor disclosure for an allow_domain posture', async () => {
+    await addFile('sandbox/sbx.json', JSON.stringify({ network: { allow_domain: ['example.com'] } }));
+    const plan = await planStart({ dir: agentDir }, sbxDeps);
+    expect(plan.warnings.join('\n')).toContain('cannot subtract');
+  });
+
+  it('should rewrite localhost provider baseUrls to the sbx gateway, leaving other hosts and non-object values alone', async () => {
+    await addFile(
+      'models.json',
+      JSON.stringify({
+        providers: {
+          ollama: { baseUrl: 'http://localhost:11434/v1' },
+          spark: { baseUrl: 'http://100.119.191.79:30000/v1' }
+        }
+      })
+    );
+    const plan = await planStart({ dir: agentDir }, sbxDeps);
+    const providers = plan.files.find(file => file.rel === 'providers.ts')?.content ?? '';
+    expect(providers).toContain('http://host.docker.internal:11434/v1');
+    expect(providers).toContain('http://100.119.191.79:30000/v1');
+    expect(providers).not.toContain('localhost:11434');
+  });
+
+  it('should not rewrite provider baseUrls under nono', async () => {
+    await rm(join(agentDir, 'sandbox'), { recursive: true });
+    await addFile('sandbox/nono.json', '{}');
+    await addFile('models.json', JSON.stringify({ providers: { ollama: { baseUrl: 'http://localhost:11434/v1' } } }));
+    const plan = await planStart({ dir: agentDir }, deps);
+    expect(plan.files.find(file => file.rel === 'providers.ts')?.content ?? '').toContain('http://localhost:11434/v1');
+  });
+});
+
+describe('materializeStart with the sbx backend', () => {
+  const sbxDeps = { ...deps, which: createWhichStub({ pi: '/shims/pi', sbx: '/shims/sbx' }) };
+
+  beforeEach(async () => {
+    await rm(join(agentDir, 'sandbox'), { recursive: true });
+    await addFile('sandbox/sbx.json', JSON.stringify({ network: { allow_domain: ['example.com'] } }));
+  });
+
+  const runRecorder = (results: { exitCode: number; stderr: string }[] = []) => {
+    const calls: (readonly string[])[] = [];
+    const run = (argv: readonly string[]) => {
+      calls.push(argv);
+      return Promise.resolve(results.shift() ?? { exitCode: 0, stderr: '' });
+    };
+    return { calls, run };
+  };
+
+  it('should run create, policy, and pinned provision in order, then wrap the argv in sbx exec', async () => {
+    const plan = await planStart({ dir: agentDir }, sbxDeps);
+    const { calls, run } = runRecorder();
+    const result = await materializeStart(plan, { run, readPiVersion: () => Promise.resolve('9.9.9') });
+    expect(calls[0]).toEqual([...(plan.sbx?.createArgv ?? [])]);
+    expect(calls[1]).toEqual([...(plan.sbx?.policyArgvs[0] ?? [])]);
+    expect(calls[2]?.join(' ')).toContain('@9.9.9');
+    expect(result.argv.slice(0, 3)).toEqual(['/shims/sbx', 'exec', '-i']);
+    expect(result.argv).toContain('HOME=/home/u');
+    expect(result.argv).toContain('pi');
+  });
+
+  it('should treat an already-exists create failure as attach', async () => {
+    const plan = await planStart({ dir: agentDir }, sbxDeps);
+    const { run } = runRecorder([{ exitCode: 1, stderr: "sandbox 'x' already exists" }]);
+    await expect(materializeStart(plan, { run })).resolves.toBeDefined();
+  });
+
+  it('should throw on any other create failure, naming the sandbox', async () => {
+    const plan = await planStart({ dir: agentDir }, sbxDeps);
+    const { run } = runRecorder([{ exitCode: 1, stderr: 'daemon not running' }]);
+    await expect(materializeStart(plan, { run })).rejects.toThrow('daemon not running');
+  });
+
+  it('should throw when a policy step fails', async () => {
+    const plan = await planStart({ dir: agentDir }, sbxDeps);
+    const { run } = runRecorder([
+      { exitCode: 0, stderr: '' },
+      { exitCode: 1, stderr: 'policy rejected' }
+    ]);
+    await expect(materializeStart(plan, { run })).rejects.toThrow('policy rejected');
+  });
+
+  it('should keep provisioning unpinned when no version reader is provided', async () => {
+    const plan = await planStart({ dir: agentDir }, sbxDeps);
+    const { calls, run } = runRecorder();
+    await materializeStart(plan, { run });
+    expect(calls[2]).toEqual([...(plan.sbx?.provisionArgv ?? [])]);
+  });
+
+  it('should keep provisioning unpinned when the version reader returns null', async () => {
+    const plan = await planStart({ dir: agentDir }, sbxDeps);
+    const { calls, run } = runRecorder();
+    await materializeStart(plan, { run, readPiVersion: () => Promise.resolve(null) });
+    expect(calls[2]).toEqual([...(plan.sbx?.provisionArgv ?? [])]);
+  });
+
+  it('should throw when the sbx plan has no command runner', async () => {
+    const plan = await planStart({ dir: agentDir }, sbxDeps);
+    await expect(materializeStart(plan, {})).rejects.toThrow('command runner');
   });
 });

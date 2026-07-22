@@ -9,7 +9,7 @@ A folder with a `SYSTEM.md` or `APPEND_SYSTEM.md` is a complete agent. Everythin
 ```
 my-agent/
   extensions/         optional   pi extensions: custom tools, commands, hooks
-  sandbox/            optional   sandbox posture (nono.json)
+  sandbox/            optional   sandbox posture (nono.json, sbx.json)
   skills/             optional   markdown playbooks, loaded when relevant
   settings.json       optional   pi-native settings (model selection)
   models.json         optional   pi-native custom provider definitions
@@ -95,4 +95,8 @@ Load order is load-bearing: cradle's generated providers extension loads first (
 
 ## sandbox/nono.json
 
-Sandbox posture — filesystem grants, network policy, and the sandbox opt-out. See [Sandbox](../sandbox/) for the full reference.
+Sandbox posture — filesystem grants, network policy, and the sandbox opt-out — for the [nono](https://github.com/always-further/nono) host-OS-policy backend. See [Sandbox](../sandbox/) for the full reference.
+
+## sandbox/sbx.json
+
+A sibling opt-in for the second backend: an agent runs inside a [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) microVM instead of (or alongside) nono when it declares `sandbox/sbx.json` — a restricted subset of `sandbox/nono.json`'s schema (no Unix-socket grants, no named network-profile pass-through, no Seatbelt escape hatch). See [Sandbox](../sandbox/) for the full schema and how cradle picks a backend when a folder ships both files.

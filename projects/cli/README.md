@@ -2,7 +2,7 @@
 
 ![CI Build](https://github.com/coryrylan/cradle/actions/workflows/pull-request.yml/badge.svg)
 
-A runtime for portable agents defined as folders. `cradle start <dir>` reads an agent folder — a `SYSTEM.md` or `APPEND_SYSTEM.md` (at least one) plus optional pi-native config, skills, extensions, and sandbox posture — and launches the [pi](https://github.com/earendil-works/pi-mono) coding agent configured from it. An agent declaring `sandbox/nono.json` runs inside the [nono](https://github.com/always-further/nono) filesystem sandbox. See [ARCHITECTURE.md](../../ARCHITECTURE.md) for the folder format and [`examples/hello`](../../examples/hello) for a minimal agent. Built with Bun and TypeScript; install the standalone binary via `install.sh` (primary) or the npm package [`@coryrylan/cradle`](https://www.npmjs.com/package/@coryrylan/cradle) (alternative).
+A runtime for portable agents defined as folders. `cradle start <dir>` reads an agent folder — a `SYSTEM.md` or `APPEND_SYSTEM.md` (at least one) plus optional pi-native config, skills, extensions, and sandbox posture — and launches the [pi](https://github.com/earendil-works/pi-mono) coding agent configured from it. An agent declaring `sandbox/nono.json` or `sandbox/sbx.json` runs sandboxed — inside the [nono](https://github.com/always-further/nono) filesystem sandbox or the [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) microVM, respectively. See [ARCHITECTURE.md](../../ARCHITECTURE.md) for the folder format and [`examples/hello`](../../examples/hello) for a minimal agent. Built with Bun and TypeScript; install the standalone binary via `install.sh` (primary) or the npm package [`@coryrylan/cradle`](https://www.npmjs.com/package/@coryrylan/cradle) (alternative).
 
 ## Dependencies
 
@@ -11,7 +11,8 @@ A runtime for portable agents defined as folders. `cradle start <dir>` reads an 
 | Tool                                              | Status          | Why                                                                                                                                                                                                                                                  |
 | ------------------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`pi`](https://github.com/earendil-works/pi-mono) | **Required**    | The coding agent cradle launches. Every `cradle start` spawns it.                                                                                                                                                                                    |
-| [`nono`](https://github.com/always-further/nono)  | **Recommended** | The filesystem sandbox pi runs inside for a sandboxed run — a folder declaring `sandbox/nono.json`, or `--sandbox`/`--offline`/`--allow-host`; required for that run, not needed otherwise.                                                          |
+| [`nono`](https://github.com/always-further/nono)  | **Recommended** | The filesystem sandbox pi runs inside for a nono-backend run — a folder declaring `sandbox/nono.json`, or `--sandbox`/`--sandbox-backend nono`/`--offline`/`--allow-host` with no `sandbox/sbx.json`; required for that run, not needed otherwise.   |
+| [`sbx`](https://docs.docker.com/ai/sandboxes/)    | **Recommended** | The Docker Sandboxes microVM pi runs inside for an sbx-backend run — a folder declaring `sandbox/sbx.json`, or `--sandbox-backend sbx`; required for that run, not needed otherwise.                                                                 |
 | [`mise`](https://mise.jdx.dev)                    | **Recommended** | The supported way to install and manage `pi` and `nono`. cradle doesn't invoke mise directly, but it falls back to mise's shims when resolving the tools, and the generated sandbox profile grants mise's trees so a sandboxed pi finds its runtime. |
 
 ## Installation
@@ -64,11 +65,12 @@ bun start
 
 ```bash
 cradle --version
-cradle doctor                         # check pi (required), nono/mise (recommended) on PATH, with versions
-cradle start ./my-agent               # run an agent folder with pi; sandboxed when sandbox/nono.json exists
+cradle doctor                         # check pi (required), nono/sbx/mise (recommended) on PATH, with versions
+cradle start ./my-agent               # run an agent folder with pi; sandboxed when sandbox/nono.json or sandbox/sbx.json exists
 cradle start my-agent                 # run a name from ~/.cradle/settings.json instead of a path
 cradle start . --offline              # block all outbound network (exfil protection)
-cradle start . --allow-host api.z.ai  # restrict network to these hosts (repeatable)
+cradle start . --allow-host api.example.com  # restrict network to these hosts (repeatable)
+cradle start . --sandbox-backend sbx  # run under the sbx Docker Sandboxes microVM instead of nono
 cradle start . --no-sandbox           # run pi directly (debug)
 cradle start . --dry-run -- --resume  # print the write plan + command; forward `--resume` to pi
 ```
@@ -89,7 +91,9 @@ The `dir` positional accepts a bare name instead of a path — `cradle start my-
 
 A bare name (no `/`, not `.`/`~`-led) checks the alias table first, falling back to the cwd-relative path (`./my-agent`) when no alias is defined — anything already path-shaped (`./x`, `../x`, `/abs/x`, `~/x`, `.`) is never looked up as an alias. See [ARCHITECTURE.md](../../ARCHITECTURE.md#global-agent-aliases) for the full resolution rules.
 
-Each sandboxed run generates its own nono profile at `~/.cradle/agents/<id>/nono-profile.json` — the built-in base merged with that agent's `sandbox/nono.json` grants — and points `nono run --profile` at it. There's no shared global profile and no separate setup step: an agent's whole sandbox posture lives in its own directory. To widen it (e.g. granting a tool's data dir), add a `sandbox/` folder to the agent with a `nono.json`:
+An agent folder can declare a sandbox posture for either backend: `sandbox/nono.json` (the OS-policy sandbox — covered in this section) or `sandbox/sbx.json` (the Docker Sandboxes microVM — see [Docker Sandboxes backend](#docker-sandboxes-backend-sandboxsbxjson) below), or both. `--sandbox-backend <nono|sbx>` picks the backend explicitly and forces it on; bare `--sandbox` uses whichever backend the folder declares, defaulting to nono, and nono wins when a folder declares both (with a warning naming `--sandbox-backend sbx` as the override).
+
+Each sandboxed nono run generates its own profile at `~/.cradle/agents/<id>/nono-profile.json` — the built-in base merged with that agent's `sandbox/nono.json` grants — and points `nono run --profile` at it. There's no shared global profile and no separate setup step: an agent's whole sandbox posture lives in its own directory. To widen it (e.g. granting a tool's data dir), add a `sandbox/` folder to the agent with a `nono.json`:
 
 ```json
 {
@@ -107,7 +111,7 @@ Outbound network is **open by default within a sandboxed run**. A `network` bloc
 {
   "network": {
     "block": false,
-    "allow_domain": ["api.z.ai", "localhost"],
+    "allow_domain": ["api.example.com", "localhost"],
     "open_port": [11434],
     "listen_port": [8080]
   }
@@ -155,7 +159,31 @@ Some tools need OS capabilities the conservative base profile denies. `sandbox/n
 
 Chrome's **own** nested sandbox can't initialize inside nono's seatbelt (macOS forbids nesting), so its child processes need `--no-sandbox`. On every sandboxed run, cradle generates and loads `agent-browser-nono-fallback.ts` before package and agent extensions. On macOS it appends `--no-sandbox` to `AGENT_BROWSER_ARGS`; on every platform it maps nono's dynamically injected `HTTPS_PROXY`/`HTTP_PROXY` to `AGENT_BROWSER_PROXY`. Explicit agent-browser proxy configuration still wins. Unsandboxed runs do not load the fallback, so Chrome keeps its own sandbox. See [`examples/browser`](../../examples/browser) for the complete folder.
 
-An agent that still cannot run sandboxed can declare `{ "sandbox": false }` instead. cradle then runs pi bare, warns loudly on every run, and an explicit `--sandbox` flag always forces isolation back on.
+An agent that still cannot run sandboxed can declare `{ "sandbox": false }` in either sandbox file to opt that backend out. cradle then runs pi bare, warns loudly on every run, and an explicit `--sandbox`/`--sandbox-backend` flag always forces isolation back on.
+
+### Docker Sandboxes backend (`sandbox/sbx.json`)
+
+A folder can opt into the [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (`sbx`) microVM instead of (or alongside) nono by declaring `sandbox/sbx.json` — a sibling file with a restricted subset of `sandbox/nono.json`'s schema: `sandbox: false` to opt out, `filesystem` `read`/`write`/`allow` only, `network` `block`/`allow_domain` only. Keys with no VM-boundary equivalent — `unix_socket_dir_bind`, `network_profile`, `open_port`, `listen_port`, `unsafe_macos_seatbelt_rules` — are warned and dropped rather than silently accepted. Force it explicitly with `--sandbox-backend sbx`; see [ARCHITECTURE.md](../../ARCHITECTURE.md#sandboxsbxjson) for the full schema, backend precedence, and run model.
+
+```json
+{
+  "network": { "allow_domain": ["api.example.com"] },
+  "filesystem": {
+    "allow": ["~/scratch"]
+  }
+}
+```
+
+An sbx run mounts your cwd (rw), the agent folder (ro), the state dir (rw), and `~/.pi/agent` (rw, so a host `pi login` and its OAuth refreshes carry over) into a sandbox named `cradle-<agentId>-<hash8>` — the hash keys the mount set, so a changed grant gets a fresh sandbox rather than attaching to stale mounts (clean those up with `sbx rm`). cradle then provisions `@earendil-works/pi-coding-agent` in-guest, pinned to the host's own `pi` version, and runs `sbx exec` with your host paths preserved verbatim, so the composed pi command is identical to a nono or unsandboxed run.
+
+Network policy differs from nono's: `block: true` denies all outbound; `allow_domain` allows the listed hosts (expanded to cover subdomains, with `localhost`/`127.0.0.1` rewritten to `host.docker.internal` — guest loopback is the microVM itself, not the host). Unlike nono's proxy, a per-sandbox `allow` rule only **adds** to your machine's global `sbx` policy and cannot subtract from it — cradle warns on every allowlist run. For strict, nono-style allowlist semantics, run `sbx policy init deny-all` once. One-time machine setup before the first sandboxed `sbx` run:
+
+```bash
+sbx login
+sbx policy init deny-all   # or allow-all / balanced — see sbx's own docs
+```
+
+`cradle doctor` checks `sbx` alongside `pi`/`nono`/`mise`.
 
 ## Build Targets
 

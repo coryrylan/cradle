@@ -377,13 +377,14 @@ describe('loadAgentFolder', () => {
       await expect(loadAgentFolder(dir)).rejects.toThrow('nono.json is not valid JSON');
     });
 
-    it('should warn when sandbox/ has no nono.json', async () => {
+    it('should warn when sandbox/ has neither nono.json nor sbx.json', async () => {
       await appendSystemMd();
       await addFile('sandbox/other.json', '{}');
       const folder = await loadAgentFolder(dir);
       expect(folder.sandbox).toEqual(EMPTY_SANDBOX);
+      expect(folder.sbx).toEqual(EMPTY_SANDBOX);
       expect(warningsText(folder)).toContain(
-        'sandbox/ has no nono.json — sandboxing stays off unless --sandbox is passed'
+        'sandbox/ has no nono.json or sbx.json — sandboxing stays off unless --sandbox is passed'
       );
     });
 
@@ -392,7 +393,7 @@ describe('loadAgentFolder', () => {
       const network = {
         block: false,
         network_profile: 'developer',
-        allow_domain: ['api.z.ai', 'localhost'],
+        allow_domain: ['api.example.com', 'localhost'],
         open_port: [0, 11434],
         listen_port: [8080]
       };
@@ -401,7 +402,7 @@ describe('loadAgentFolder', () => {
       expect(folder.sandbox.network).toEqual({
         block: false,
         networkProfile: 'developer',
-        allowDomain: ['api.z.ai', 'localhost'],
+        allowDomain: ['api.example.com', 'localhost'],
         openPort: [0, 11434],
         listenPort: [8080]
       });
@@ -410,9 +411,9 @@ describe('loadAgentFolder', () => {
 
     it('should trim allow_domain entries so stray whitespace never reaches the profile', async () => {
       await appendSystemMd();
-      await addFile('sandbox/nono.json', JSON.stringify({ network: { allow_domain: ['api.z.ai ', ' localhost'] } }));
+      await addFile('sandbox/nono.json', JSON.stringify({ network: { allow_domain: ['api.example.com ', ' localhost'] } }));
       const folder = await loadAgentFolder(dir);
-      expect(folder.sandbox.network).toEqual({ allowDomain: ['api.z.ai', 'localhost'] });
+      expect(folder.sandbox.network).toEqual({ allowDomain: ['api.example.com', 'localhost'] });
       expect(folder.warnings).toEqual([]);
     });
 
@@ -606,6 +607,188 @@ describe('loadAgentFolder', () => {
       await mkdir(join(dir, 'sandbox'));
       await symlink(join(dir, 'sandbox', 'missing-target.json'), join(dir, 'sandbox', 'nono.json'));
       await expect(loadAgentFolder(dir)).rejects.toThrow('sandbox/nono.json could not be read — broken symlink?');
+    });
+  });
+
+  describe('sandbox/sbx.json', () => {
+    it('should stay unconfigured when sandbox/ has only nono.json, without a missing-file warning', async () => {
+      await appendSystemMd();
+      await addFile('sandbox/nono.json', JSON.stringify({}));
+      const folder = await loadAgentFolder(dir);
+      expect(folder.sbx).toEqual(EMPTY_SANDBOX);
+      expect(folder.warnings).toEqual([]);
+    });
+
+    it('should stay unconfigured when sandbox/ has neither file (covered by the shared missing-file warning above)', async () => {
+      await appendSystemMd();
+      await mkdir(join(dir, 'sandbox'));
+      const folder = await loadAgentFolder(dir);
+      expect(folder.sbx).toEqual(EMPTY_SANDBOX);
+      expect(warningsText(folder)).toContain(
+        'sandbox/ has no nono.json or sbx.json — sandboxing stays off unless --sandbox is passed'
+      );
+    });
+
+    it('should not warn about a missing file when sandbox/ has only sbx.json', async () => {
+      await appendSystemMd();
+      await addFile('sandbox/sbx.json', JSON.stringify({}));
+      const folder = await loadAgentFolder(dir);
+      expect(folder.sandbox).toEqual(EMPTY_SANDBOX);
+      expect(folder.sbx).toMatchObject({ posture: 'enabled' });
+      expect(folder.warnings).toEqual([]);
+    });
+
+    it('should enable sandboxing by default when sbx.json exists and honor an opt-out', async () => {
+      await appendSystemMd();
+      await addFile('sandbox/sbx.json', JSON.stringify({ sandbox: false }));
+      const optedOut = await loadAgentFolder(dir);
+      expect(optedOut.sbx).toMatchObject({ posture: 'disabled' });
+      expect(optedOut.warnings).toEqual([]);
+      await addFile('sandbox/sbx.json', JSON.stringify({ sandbox: true }));
+      expect((await loadAgentFolder(dir)).sbx).toMatchObject({ posture: 'enabled' });
+      await addFile('sandbox/sbx.json', JSON.stringify({}));
+      expect((await loadAgentFolder(dir)).sbx).toMatchObject({ posture: 'enabled' });
+    });
+
+    it('should reject malformed sbx.json', async () => {
+      await appendSystemMd();
+      await addFile('sandbox/sbx.json', '{nope');
+      await expect(loadAgentFolder(dir)).rejects.toThrow('sbx.json is not valid JSON');
+    });
+
+    it('should warn on unsupported sbx.json keys', async () => {
+      await appendSystemMd();
+      await addFile('sandbox/sbx.json', JSON.stringify({ bogus: 1 }));
+      const folder = await loadAgentFolder(dir);
+      expect(warningsText(folder)).toContain('unsupported keys ignored: bogus');
+    });
+
+    it('should parse read/write/allow filesystem grants the same way nono.json does (no ~-expansion at this layer)', async () => {
+      await appendSystemMd();
+      await addFile(
+        'sandbox/sbx.json',
+        JSON.stringify({
+          filesystem: { read: ['~/data', '/etc/certs'], write: ['$HOME/out'], allow: ['~/scratch', '/opt/cache'] }
+        })
+      );
+      const folder = await loadAgentFolder(dir);
+      expect(folder.sbx.filesystem).toEqual({
+        read: ['~/data', '/etc/certs'],
+        write: ['$HOME/out'],
+        allow: ['~/scratch', '/opt/cache'],
+        unixSocketDirBind: []
+      });
+      expect(folder.warnings).toEqual([]);
+    });
+
+    it('should warn and drop filesystem grant entries that are not path-shaped, same as nono.json', async () => {
+      await appendSystemMd();
+      await addFile('sandbox/sbx.json', JSON.stringify({ filesystem: { read: ['--danger', 'relative/x', '/ok'] } }));
+      const folder = await loadAgentFolder(dir);
+      expect(folder.sbx.filesystem.read).toEqual(['/ok']);
+      expect(warningsText(folder)).toContain('ignored: --danger, relative/x');
+    });
+
+    it('should warn and drop unix_socket_dir_bind as nono-only, keeping unixSocketDirBind empty', async () => {
+      await appendSystemMd();
+      await addFile(
+        'sandbox/sbx.json',
+        JSON.stringify({ filesystem: { read: ['/ok'], unix_socket_dir_bind: ['~/.agent-browser'] } })
+      );
+      const folder = await loadAgentFolder(dir);
+      expect(folder.sbx.filesystem).toEqual({ read: ['/ok'], write: [], allow: [], unixSocketDirBind: [] });
+      expect(warningsText(folder)).toContain(
+        'unix_socket_dir_bind is nono-only — Unix sockets cannot cross the sbx VM boundary; ignored'
+      );
+      // Dedicated nono-only message only — no duplicate generic "unsupported key" noise.
+      expect(warningsText(folder)).not.toContain('unsupported keys ignored: unix_socket_dir_bind');
+    });
+
+    it('should warn and drop network_profile as nono-only', async () => {
+      await appendSystemMd();
+      await addFile('sandbox/sbx.json', JSON.stringify({ network: { network_profile: 'developer' } }));
+      const folder = await loadAgentFolder(dir);
+      expect(folder.sbx.network).toBeUndefined();
+      expect(warningsText(folder)).toContain('network_profile is nono-only — ignored');
+    });
+
+    it('should warn and drop open_port as nono-only', async () => {
+      await appendSystemMd();
+      await addFile('sandbox/sbx.json', JSON.stringify({ network: { open_port: [11434] } }));
+      const folder = await loadAgentFolder(dir);
+      expect(folder.sbx.network).toBeUndefined();
+      expect(warningsText(folder)).toContain('open_port is nono-only — ignored');
+    });
+
+    it('should warn and drop listen_port as nono-only', async () => {
+      await appendSystemMd();
+      await addFile('sandbox/sbx.json', JSON.stringify({ network: { listen_port: [8080] } }));
+      const folder = await loadAgentFolder(dir);
+      expect(folder.sbx.network).toBeUndefined();
+      expect(warningsText(folder)).toContain('listen_port is nono-only — ignored');
+    });
+
+    it('should keep block and allow_domain while dropping nono-only keys from the same network block', async () => {
+      await appendSystemMd();
+      await addFile(
+        'sandbox/sbx.json',
+        JSON.stringify({
+          network: {
+            block: false,
+            allow_domain: ['api.example.com'],
+            network_profile: 'developer',
+            open_port: [1],
+            listen_port: [2]
+          }
+        })
+      );
+      const folder = await loadAgentFolder(dir);
+      expect(folder.sbx.network).toEqual({ block: false, allowDomain: ['api.example.com'] });
+      const text = warningsText(folder);
+      expect(text).toContain('network_profile is nono-only — ignored');
+      expect(text).toContain('open_port is nono-only — ignored');
+      expect(text).toContain('listen_port is nono-only — ignored');
+      // The nono-only keys stay in the "supported" set so they don't ALSO trip the generic warning.
+      expect(text).not.toContain('unsupported keys ignored');
+    });
+
+    it('should warn and drop a non-object network', async () => {
+      await appendSystemMd();
+      await addFile('sandbox/sbx.json', JSON.stringify({ network: 'block' }));
+      const folder = await loadAgentFolder(dir);
+      expect(folder.sbx.network).toBeUndefined();
+      expect(warningsText(folder)).toContain('network must be an object');
+    });
+
+    it('should warn and drop unsafe_macos_seatbelt_rules as nono-only, leaving rules empty', async () => {
+      await appendSystemMd();
+      await addFile('sandbox/sbx.json', JSON.stringify({ unsafe_macos_seatbelt_rules: ['(allow mach-register)'] }));
+      const folder = await loadAgentFolder(dir);
+      expect(folder.sbx.unsafeMacosSeatbeltRules).toEqual([]);
+      expect(warningsText(folder)).toContain(
+        'unsafe_macos_seatbelt_rules is nono-only — the sbx VM boundary replaces Seatbelt; ignored'
+      );
+      expect(warningsText(folder)).not.toContain('unsupported keys ignored: unsafe_macos_seatbelt_rules');
+    });
+
+    it('should read nono.json and sbx.json independently when both are present', async () => {
+      await appendSystemMd();
+      await addFile('sandbox/nono.json', JSON.stringify({ sandbox: false, network: { block: true } }));
+      await addFile('sandbox/sbx.json', JSON.stringify({ network: { allow_domain: ['api.example.com'] } }));
+      const folder = await loadAgentFolder(dir);
+      expect(folder.sandbox).toEqual({
+        posture: 'disabled',
+        network: { block: true },
+        filesystem: { read: [], write: [], allow: [], unixSocketDirBind: [] },
+        unsafeMacosSeatbeltRules: []
+      });
+      expect(folder.sbx).toEqual({
+        posture: 'enabled',
+        network: { allowDomain: ['api.example.com'] },
+        filesystem: { read: [], write: [], allow: [], unixSocketDirBind: [] },
+        unsafeMacosSeatbeltRules: []
+      });
+      expect(folder.warnings).toEqual([]);
     });
   });
 
