@@ -1,3 +1,9 @@
+## [1.3.0](https://github.com/coryrylan/cradle/compare/cradle-v1.2.0...cradle-v1.3.0) (2026-07-26)
+
+### Features
+
+* **cli:** enhance package filtering and extensions handling ([03ae139](https://github.com/coryrylan/cradle/commit/03ae1390de541f94f701413ac6853fede7b6c73a))
+
 ## [1.2.0](https://github.com/coryrylan/cradle/compare/cradle-v1.1.0...cradle-v1.2.0) (2026-07-26)
 
 ### Features
