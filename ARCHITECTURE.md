@@ -83,12 +83,22 @@ These are passed explicitly as `--provider`/`--model`/`--thinking`, so the machi
 
 ```json
 {
-  "packages": ["npm:pi-example-tool", "npm:@scope/tool@1.2.0"],
+  "packages": [
+    "npm:pi-example-tool",
+    "npm:@scope/tool@1.2.0",
+    { "source": "npm:pi-multi-tool", "extensions": ["extensions/*.ts", "!extensions/legacy.ts"] }
+  ],
   "npmCommand": ["npm"]
 }
 ```
 
-Only `npm:<name>[@<version>]` sources are supported — pi also accepts `git:`, `https://`, `ssh://`, and local-path sources, but cradle installs the package itself (agent runs pass `--no-extensions`, so pi's own package loader never runs for them), and those other source forms are warned and dropped rather than installed. Before the sandbox spawns, cradle installs each declared package into a private npm project at `<state>/npm` via the `npmCommand` prefix (a single command naming one of `npm`, `pnpm`, `yarn`, or `bun` — a folder can't supply arbitrary installer argv; default `npm`, so `npm install --ignore-scripts` — package lifecycle scripts never run on the host; reinstalled only when the resolved dependency set changes), then resolves each installed package's `package.json` `pi.extensions` entries (falling back to a top-level `index.ts` when a package declares none) into explicit `-e` flags — pi loads explicit `-e` paths even under `--no-extensions`. Any other pi-native setting (`theme`, `quietStartup`, `collapseChangelog`, …) has no effect in an agent folder: pi reads those keys from `~/.pi/agent/settings.json` and the project's `.pi/settings.json`, never from the folder, and exposes no CLI flags cradle could map them to — so cradle warns at start instead of silently dropping them.
+Only `npm:<name>[@<version>]` sources are supported — pi also accepts `git:`, `https://`, `ssh://`, and local-path sources, but cradle installs the package itself (agent runs pass `--no-extensions`, so pi's own package loader never runs for them), and those other source forms are warned and dropped rather than installed. Before the sandbox spawns, cradle installs each declared package into a private npm project at `<state>/npm` via the `npmCommand` prefix (a single command naming one of `npm`, `pnpm`, `yarn`, or `bun` — a folder can't supply arbitrary installer argv; default `npm`, so `npm install --ignore-scripts` — package lifecycle scripts never run on the host; reinstalled only when the resolved dependency set changes), then resolves each installed package's extensions into explicit `-e` flags — pi loads explicit `-e` paths even under `--no-extensions`.
+
+Discovery mirrors pi's own order: the `package.json` `pi.extensions` entries (each a file, a directory of extensions, or a glob, with the manifest's own `!`/`+`/`-` overrides applied), else a convention `extensions/` directory, else a top-level `index.ts`/`index.js`. A directory contributes its top-level `*.ts`/`*.js` files plus each subdirectory's `index.ts`/`index.js` — the same shapes cradle discovers in an agent's own `extensions/`.
+
+pi's [object form](https://pi.dev/docs/latest/packages#package-filtering) then filters what that discovery found: omit `extensions` to load everything the package declares, `[]` to load none, or list patterns — a plain glob includes, `!` excludes, `+` force-includes an exact path, `-` force-excludes one, all relative to the package root. `"autoload": false` inverts the default: nothing loads except what a pattern names. The sibling `skills`/`prompts`/`themes` filters parse but are warned as ignored — cradle delivers a package's extensions and nothing else, since a package's skills and prompt templates never reach a run under `--no-extensions --no-skills --no-prompt-templates`.
+
+Any other pi-native setting (`theme`, `quietStartup`, `collapseChangelog`, …) has no effect in an agent folder: pi reads those keys from `~/.pi/agent/settings.json` and the project's `.pi/settings.json`, never from the folder, and exposes no CLI flags cradle could map them to — so cradle warns at start instead of silently dropping them.
 
 ### `models.json`
 
@@ -202,17 +212,17 @@ The load-bearing caveat: a per-sandbox `allow` rule only ADDS to your machine's 
 
 Cradle translates the folder into explicit pi flags — never into files inside `~/.pi/agent`:
 
-| Agent folder                      | pi mechanism                                                   |
-| --------------------------------- | -------------------------------------------------------------- |
-| `SYSTEM.md`                       | `--system-prompt <path>` (replaces pi's default prompt)        |
-| `APPEND_SYSTEM.md`                | `--append-system-prompt <path>` (appends to it)                |
-| `settings.json` model keys        | `--provider` / `--model` / `--thinking`                        |
-| `models.json`                     | generated `-e` extension → `pi.registerProvider(…)`            |
-| `settings.json` `packages`        | per-agent npm install → each package's `pi.extensions` as `-e` |
-| `skills/`                         | `--skill <dir>`                                                |
-| `extensions/`                     | `-e <file>` per extension, verbatim, loaded last               |
-| session history                   | `--session-dir ~/.cradle/agents/<id>/sessions`                 |
-| isolation from personal pi config | `--no-extensions --no-skills --no-prompt-templates`            |
+| Agent folder                      | pi mechanism                                                       |
+| --------------------------------- | ------------------------------------------------------------------ |
+| `SYSTEM.md`                       | `--system-prompt <path>` (replaces pi's default prompt)            |
+| `APPEND_SYSTEM.md`                | `--append-system-prompt <path>` (appends to it)                    |
+| `settings.json` model keys        | `--provider` / `--model` / `--thinking`                            |
+| `models.json`                     | generated `-e` extension → `pi.registerProvider(…)`                |
+| `settings.json` `packages`        | per-agent npm install → each package's selected extensions as `-e` |
+| `skills/`                         | `--skill <dir>`                                                    |
+| `extensions/`                     | `-e <file>` per extension, verbatim, loaded last                   |
+| session history                   | `--session-dir ~/.cradle/agents/<id>/sessions`                     |
+| isolation from personal pi config | `--no-extensions --no-skills --no-prompt-templates`                |
 
 Generated extensions land in `~/.cradle/agents/<id>/extensions/` (regenerated every run) with the agent folder's absolute paths baked in as constants.
 

@@ -53,7 +53,20 @@ Keys cradle doesn't map (`theme`, `quietStartup`, `collapseChangelog`, …) have
 }
 ```
 
-Only `npm:<name>[@<version>]` sources are supported — cradle installs each declared package into a private npm project under the agent's state dir before the sandbox spawns, then resolves the installed package's `pi.extensions` entries into explicit `-e` flags. Other pi source forms (`git:`, `https://`, `ssh://`, local paths) are warned and dropped.
+Only `npm:<name>[@<version>]` sources are supported — cradle installs each declared package into a private npm project under the agent's state dir before the sandbox spawns, then resolves the installed package's extensions into explicit `-e` flags: the `pi.extensions` entries its `package.json` declares (files, directories, or globs), else a convention `extensions/` directory, else a top-level `index.ts`/`index.js`. Other pi source forms (`git:`, `https://`, `ssh://`, local paths) are warned and dropped.
+
+pi's object form picks which of those extensions load:
+
+```json
+{
+  "packages": [
+    { "source": "npm:pi-multi-tool", "extensions": ["extensions/*.ts", "!extensions/legacy.ts"] },
+    { "source": "npm:pi-big-tool", "autoload": false, "extensions": ["+extensions/review.ts"] }
+  ]
+}
+```
+
+Omit `extensions` to load everything the package declares, `[]` to load none, or list patterns: a plain glob includes, `!` excludes, `+` force-includes an exact path, `-` force-excludes one — all relative to the package root. `"autoload": false` flips the default so nothing loads except what a pattern names. The sibling `skills`, `prompts`, and `themes` filters are accepted and warned as ignored: cradle delivers a package's extensions and nothing else.
 
 `npmCommand` selects the installer, and must be a single-element array naming one of `npm`, `pnpm`, `yarn`, or `bun` — a bare command name, no paths, no flags, no extra argv. The install runs on the host before the sandbox spawns, so a wider shape would let a folder's settings.json run arbitrary host commands; anything else is warned and dropped, falling back to `npm`.
 

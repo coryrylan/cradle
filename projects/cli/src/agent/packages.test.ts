@@ -20,16 +20,18 @@ describe('readPackageSpecs', () => {
     expect(warnings).toEqual([]);
   });
 
-  it('should warn and drop when packages is not an array of strings', () => {
+  it('should warn and drop when packages is not an array', () => {
     const { specs, warnings } = parse({ nope: true });
     expect(specs).toEqual([]);
-    expect(warnings).toEqual(['settings.json: packages must be an array of strings — ignored']);
+    expect(warnings).toEqual(['settings.json: packages must be an array — ignored']);
   });
 
-  it('should warn and drop when packages contains a non-string entry', () => {
+  it('should warn and drop an entry that is neither a source string nor an object, keeping the valid ones', () => {
     const { specs, warnings } = parse(['npm:ok', 7]);
-    expect(specs).toEqual([]);
-    expect(warnings).toEqual(['settings.json: packages must be an array of strings — ignored']);
+    expect(specs).toEqual([{ name: 'ok', version: 'latest' }]);
+    expect(warnings).toEqual([
+      'settings.json: packages entries must be a source string or a { "source": … } object — ignored: 7'
+    ]);
   });
 
   it('should parse a bare npm: source with an implicit latest version', () => {
@@ -90,6 +92,84 @@ describe('readPackageSpecs', () => {
     const { specs, warnings } = parse(['npm:x@git+https://x']);
     expect(specs).toEqual([]);
     expect(warnings.join('\n')).toContain('npm:x@git+https://x');
+  });
+
+  it('should parse the object form, which carries the same npm: source', () => {
+    const { specs, warnings } = parse([{ source: 'npm:pi-example-tool@1.2.0' }]);
+    expect(specs).toEqual([{ name: 'pi-example-tool', version: '1.2.0' }]);
+    expect(warnings).toEqual([]);
+  });
+
+  it('should carry the object form extensions filter onto the spec', () => {
+    const { specs, warnings } = parse([
+      { source: 'npm:tool', extensions: ['extensions/*.ts', '!extensions/legacy.ts'] }
+    ]);
+    expect(specs).toEqual([
+      { name: 'tool', version: 'latest', extensions: ['extensions/*.ts', '!extensions/legacy.ts'] }
+    ]);
+    expect(warnings).toEqual([]);
+  });
+
+  it('should carry an empty extensions filter, which selects no extensions', () => {
+    const { specs, warnings } = parse([{ source: 'npm:tool', extensions: [] }]);
+    expect(specs).toEqual([{ name: 'tool', version: 'latest', extensions: [] }]);
+    expect(warnings).toEqual([]);
+  });
+
+  it('should carry autoload: false as the delta filter flag', () => {
+    const { specs, warnings } = parse([{ source: 'npm:tool', autoload: false, extensions: ['+index.ts'] }]);
+    expect(specs).toEqual([{ name: 'tool', version: 'latest', extensions: ['+index.ts'], autoloadDisabled: true }]);
+    expect(warnings).toEqual([]);
+  });
+
+  it('should ignore autoload: true, the default', () => {
+    const { specs, warnings } = parse([{ source: 'npm:tool', autoload: true }]);
+    expect(specs).toEqual([{ name: 'tool', version: 'latest' }]);
+    expect(warnings).toEqual([]);
+  });
+
+  it('should warn and drop a non-boolean autoload', () => {
+    const { specs, warnings } = parse([{ source: 'npm:tool', autoload: 'false' }]);
+    expect(specs).toEqual([{ name: 'tool', version: 'latest' }]);
+    expect(warnings).toEqual(['settings.json: packages entry npm:tool: autoload must be a boolean — ignored']);
+  });
+
+  it('should warn and drop an extensions filter that is not an array of strings', () => {
+    const { specs, warnings } = parse([{ source: 'npm:tool', extensions: 'index.ts' }]);
+    expect(specs).toEqual([{ name: 'tool', version: 'latest' }]);
+    expect(warnings).toEqual([
+      'settings.json: packages entry npm:tool: extensions must be an array of strings — ignored'
+    ]);
+  });
+
+  it('should warn that the sibling resource filters are not delivered', () => {
+    const { specs, warnings } = parse([{ source: 'npm:tool', skills: [], prompts: ['prompts/review.md'] }]);
+    expect(specs).toEqual([{ name: 'tool', version: 'latest' }]);
+    expect(warnings).toEqual([
+      "settings.json: packages entry npm:tool: cradle loads a package's extensions and nothing else — ignored: skills, prompts"
+    ]);
+  });
+
+  it('should warn about unknown filter keys', () => {
+    const { specs, warnings } = parse([{ source: 'npm:tool', nope: true }]);
+    expect(specs).toEqual([{ name: 'tool', version: 'latest' }]);
+    expect(warnings).toEqual(['settings.json: packages entry npm:tool: unknown filter keys — ignored: nope']);
+  });
+
+  it('should warn and drop an object entry with no source string', () => {
+    const { specs, warnings } = parse([{ extensions: ['*.ts'] }, 'npm:ok']);
+    expect(specs).toEqual([{ name: 'ok', version: 'latest' }]);
+    expect(warnings).toEqual([
+      'settings.json: packages entries must be a source string or a { "source": … } object — ignored: {"extensions":["*.ts"]}'
+    ]);
+  });
+
+  it('should drop an object entry carrying a non-npm source', () => {
+    const { specs, warnings } = parse([{ source: 'git:github.com/user/repo', extensions: ['*.ts'] }]);
+    expect(specs).toEqual([]);
+    expect(warnings).toEqual([
+      'settings.json: only npm: package sources are supported — ignored: git:github.com/user/repo'
+    ]);
   });
 
   it('should combine invalid and non-npm warnings for a mixed list, keeping only the valid entries', () => {
@@ -220,5 +300,133 @@ describe('resolvePackageEntries', () => {
     ]);
     expect(entries).toEqual([join(npmDir, 'node_modules', 'good-tool', 'index.ts')]);
     expect(warnings).toEqual(['package missing-tool is not installed — skipped']);
+  });
+
+  it('should fall back to index.js when there is no index.ts', async () => {
+    await addPackage('js-tool', { name: 'js-tool' }, { 'index.js': '' });
+    const { entries, warnings } = await resolvePackageEntries(npmDir, [{ name: 'js-tool', version: 'latest' }]);
+    expect(entries).toEqual([join(npmDir, 'node_modules', 'js-tool', 'index.js')]);
+    expect(warnings).toEqual([]);
+  });
+
+  describe('discovery', () => {
+    async function addDirPackage(name: string, manifest: unknown): Promise<string> {
+      await addPackage(name, manifest, {
+        'extensions/alpha.ts': '',
+        'extensions/legacy.ts': '',
+        'extensions/nested/index.ts': '',
+        'extensions/notes.md': ''
+      });
+      return join(npmDir, 'node_modules', name, 'extensions');
+    }
+
+    it('should expand a declared directory into its top-level files and each subdirectory index', async () => {
+      const dir = await addDirPackage('dir-tool', { name: 'dir-tool', pi: { extensions: ['./extensions'] } });
+      const { entries, warnings } = await resolvePackageEntries(npmDir, [{ name: 'dir-tool', version: 'latest' }]);
+      expect(entries).toEqual([join(dir, 'alpha.ts'), join(dir, 'legacy.ts'), join(dir, 'nested', 'index.ts')]);
+      expect(warnings).toEqual([]);
+    });
+
+    it('should discover the convention extensions directory when the manifest declares none', async () => {
+      const dir = await addDirPackage('convention-tool', { name: 'convention-tool' });
+      const { entries, warnings } = await resolvePackageEntries(npmDir, [
+        { name: 'convention-tool', version: 'latest' }
+      ]);
+      expect(entries).toEqual([join(dir, 'alpha.ts'), join(dir, 'legacy.ts'), join(dir, 'nested', 'index.ts')]);
+      expect(warnings).toEqual([]);
+    });
+
+    it('should expand a declared glob', async () => {
+      const dir = await addDirPackage('glob-tool', { name: 'glob-tool', pi: { extensions: ['extensions/*.ts'] } });
+      const { entries, warnings } = await resolvePackageEntries(npmDir, [{ name: 'glob-tool', version: 'latest' }]);
+      expect(entries).toEqual([join(dir, 'alpha.ts'), join(dir, 'legacy.ts')]);
+      expect(warnings).toEqual([]);
+    });
+
+    it('should apply the manifest own exclusion patterns', async () => {
+      const dir = await addDirPackage('manifest-filter-tool', {
+        name: 'manifest-filter-tool',
+        pi: { extensions: ['./extensions', '!extensions/legacy.ts'] }
+      });
+      const { entries, warnings } = await resolvePackageEntries(npmDir, [
+        { name: 'manifest-filter-tool', version: 'latest' }
+      ]);
+      expect(entries).toEqual([join(dir, 'alpha.ts'), join(dir, 'nested', 'index.ts')]);
+      expect(warnings).toEqual([]);
+    });
+
+    it('should warn and drop a glob that escapes the package directory', async () => {
+      await addPackage('neighbor-tool', { name: 'neighbor-tool' }, { 'index.ts': '' });
+      await addDirPackage('glob-escape-tool', {
+        name: 'glob-escape-tool',
+        pi: { extensions: ['../neighbor-tool/*.ts'] }
+      });
+      const { entries, warnings } = await resolvePackageEntries(npmDir, [
+        { name: 'glob-escape-tool', version: 'latest' }
+      ]);
+      expect(entries).toEqual([]);
+      expect(warnings.join('\n')).toContain('escapes the package directory');
+    });
+  });
+
+  describe('settings filter', () => {
+    const declared = { name: 'filter-tool', pi: { extensions: ['./extensions'] } };
+    async function addFilterPackage(): Promise<string> {
+      await addPackage('filter-tool', declared, {
+        'extensions/alpha.ts': '',
+        'extensions/legacy.ts': '',
+        'extensions/nested/index.ts': ''
+      });
+      return join(npmDir, 'node_modules', 'filter-tool', 'extensions');
+    }
+
+    it('should keep every declared extension when the spec carries no filter', async () => {
+      const dir = await addFilterPackage();
+      const { entries } = await resolvePackageEntries(npmDir, [{ name: 'filter-tool', version: 'latest' }]);
+      expect(entries).toEqual([join(dir, 'alpha.ts'), join(dir, 'legacy.ts'), join(dir, 'nested', 'index.ts')]);
+    });
+
+    it('should narrow to the filter include glob', async () => {
+      const dir = await addFilterPackage();
+      const { entries, warnings } = await resolvePackageEntries(npmDir, [
+        { name: 'filter-tool', version: 'latest', extensions: ['extensions/*.ts'] }
+      ]);
+      expect(entries).toEqual([join(dir, 'alpha.ts'), join(dir, 'legacy.ts')]);
+      expect(warnings).toEqual([]);
+    });
+
+    it('should drop filter exclusions', async () => {
+      const dir = await addFilterPackage();
+      const { entries } = await resolvePackageEntries(npmDir, [
+        { name: 'filter-tool', version: 'latest', extensions: ['!extensions/legacy.ts'] }
+      ]);
+      expect(entries).toEqual([join(dir, 'alpha.ts'), join(dir, 'nested', 'index.ts')]);
+    });
+
+    it('should select nothing, silently, for an empty filter', async () => {
+      await addFilterPackage();
+      const { entries, warnings } = await resolvePackageEntries(npmDir, [
+        { name: 'filter-tool', version: 'latest', extensions: [] }
+      ]);
+      expect(entries).toEqual([]);
+      expect(warnings).toEqual([]);
+    });
+
+    it('should select only the named patterns when autoload is disabled', async () => {
+      const dir = await addFilterPackage();
+      const { entries } = await resolvePackageEntries(npmDir, [
+        { name: 'filter-tool', version: 'latest', extensions: ['+extensions/alpha.ts'], autoloadDisabled: true }
+      ]);
+      expect(entries).toEqual([join(dir, 'alpha.ts')]);
+    });
+
+    it('should select nothing when autoload is disabled with no patterns', async () => {
+      await addFilterPackage();
+      const { entries, warnings } = await resolvePackageEntries(npmDir, [
+        { name: 'filter-tool', version: 'latest', autoloadDisabled: true }
+      ]);
+      expect(entries).toEqual([]);
+      expect(warnings).toEqual([]);
+    });
   });
 });
