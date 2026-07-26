@@ -1,7 +1,7 @@
 // Composes argv arrays and mount lists for the Docker Sandboxes (`sbx`)
 // backend — cradle's second sandbox backend alongside nono (see
 // `nono/profiles.ts`). Pure composition: no I/O, no spawning, no process
-// state. `commands/start.ts` wires this in (a later task).
+// state. `commands/run.ts` wires this in (a later task).
 
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';

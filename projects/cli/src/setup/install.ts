@@ -1,5 +1,5 @@
 // Platform-independent filesystem primitives: idempotent, dry-run-aware tree
-// writes that record a status per action. `installTree` is what `commands/start.ts`
+// writes that record a status per action. `installTree` is what `commands/run.ts`
 // uses to materialize an agent's generated extensions. No brew/mise/macOS here,
 // so they're unit-tested on any OS.
 

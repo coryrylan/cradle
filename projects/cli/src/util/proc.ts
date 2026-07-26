@@ -6,7 +6,9 @@ interface Killable {
 
 /** A signal handler that forwards `signal` to `proc`. */
 export function killOn(proc: Killable, signal: ForwardableSignal): () => void {
-  return () => proc.kill(signal);
+  return () => {
+    proc.kill(signal);
+  };
 }
 
 /**
@@ -23,7 +25,7 @@ export function killOn(proc: Killable, signal: ForwardableSignal): () => void {
 export async function runForeground(argv: readonly string[], env: Record<string, string> = {}): Promise<number> {
   const [cmd, ...rest] = argv;
   if (!cmd) {
-    throw new Error('runForeground requires at least one argument');
+    throw new Error('Command requires at least one argument');
   }
 
   const proc = Bun.spawn([cmd, ...rest], {
@@ -52,14 +54,14 @@ export async function runForeground(argv: readonly string[], env: Record<string,
 /**
  * Run a setup command silently, capturing stderr for the caller's error
  * message — the sbx create/policy/provision sequence, see
- * `commands/start.ts`'s `MaterializeDeps.run`. Never throws on a non-zero
+ * `commands/run.ts`'s `MaterializeDeps.run`. Never throws on a non-zero
  * exit: the caller decides which failures matter (an sbx create name
  * collision means attach, not failure).
  */
 export async function runCapture(argv: readonly string[]): Promise<{ exitCode: number; stderr: string }> {
   const [cmd, ...rest] = argv;
   if (!cmd) {
-    throw new Error('runCapture requires at least one argument');
+    throw new Error('Command requires at least one argument');
   }
 
   const proc = Bun.spawn([cmd, ...rest], {
@@ -77,7 +79,7 @@ export async function runCapture(argv: readonly string[]): Promise<{ exitCode: n
 export async function runInstall(command: readonly string[], cwd: string): Promise<void> {
   const [cmd, ...rest] = command;
   if (!cmd) {
-    throw new Error('runInstall requires at least one argument');
+    throw new Error('Command requires at least one argument');
   }
 
   const proc = Bun.spawn([cmd, ...rest], {
@@ -90,6 +92,6 @@ export async function runInstall(command: readonly string[], cwd: string): Promi
 
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
-    throw new Error(`package install failed (${command.join(' ')} exited ${exitCode})`);
+    throw new Error(`Package install failed (${command.join(' ')} exited ${String(exitCode)})`);
   }
 }

@@ -2,7 +2,7 @@
 
 ![CI Build](https://github.com/coryrylan/cradle/actions/workflows/pull-request.yml/badge.svg)
 
-A runtime for portable agents defined as folders. `cradle start <dir>` reads an agent folder — a `SYSTEM.md` or `APPEND_SYSTEM.md` (at least one) plus optional pi-native config, skills, extensions, and sandbox posture — and launches the [pi](https://github.com/earendil-works/pi-mono) coding agent configured from it. An agent declaring `sandbox/nono.json` or `sandbox/sbx.json` runs sandboxed — inside the [nono](https://github.com/always-further/nono) filesystem sandbox or the [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) microVM, respectively. See [ARCHITECTURE.md](../../ARCHITECTURE.md) for the folder format and [`examples/hello`](../../examples/hello) for a minimal agent. Built with Bun and TypeScript; install the standalone binary via `install.sh` (primary) or the npm package [`@coryrylan/cradle`](https://www.npmjs.com/package/@coryrylan/cradle) (alternative).
+A runtime for portable agents defined as folders. `cradle run <dir>` reads an agent folder — a `SYSTEM.md` or `APPEND_SYSTEM.md` (at least one) plus optional pi-native config, skills, extensions, and sandbox posture — and launches the [pi](https://github.com/earendil-works/pi-mono) coding agent configured from it. An agent declaring `sandbox/nono.json` or `sandbox/sbx.json` runs sandboxed — inside the [nono](https://github.com/always-further/nono) filesystem sandbox or the [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) microVM, respectively. See [ARCHITECTURE.md](../../ARCHITECTURE.md) for the folder format and [`examples/hello`](../../examples/hello) for a minimal agent. Built with Bun and TypeScript; install the standalone binary via `install.sh` (primary) or the npm package [`@coryrylan/cradle`](https://www.npmjs.com/package/@coryrylan/cradle) (alternative).
 
 ## Dependencies
 
@@ -10,7 +10,7 @@ A runtime for portable agents defined as folders. `cradle start <dir>` reads an 
 
 | Tool                                              | Status          | Why                                                                                                                                                                                                                                                  |
 | ------------------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`pi`](https://github.com/earendil-works/pi-mono) | **Required**    | The coding agent cradle launches. Every `cradle start` spawns it.                                                                                                                                                                                    |
+| [`pi`](https://github.com/earendil-works/pi-mono) | **Required**    | The coding agent cradle launches. Every `cradle run` spawns it.                                                                                                                                                                                      |
 | [`nono`](https://github.com/always-further/nono)  | **Recommended** | The filesystem sandbox pi runs inside for a nono-backend run — a folder declaring `sandbox/nono.json`, or `--sandbox`/`--sandbox-backend nono`/`--offline`/`--allow-host` with no `sandbox/sbx.json`; required for that run, not needed otherwise.   |
 | [`sbx`](https://docs.docker.com/ai/sandboxes/)    | **Recommended** | The Docker Sandboxes microVM pi runs inside for an sbx-backend run — a folder declaring `sandbox/sbx.json`, or `--sandbox-backend sbx`; required for that run, not needed otherwise.                                                                 |
 | [`mise`](https://mise.jdx.dev)                    | **Recommended** | The supported way to install and manage `pi` and `nono`. cradle doesn't invoke mise directly, but it falls back to mise's shims when resolving the tools, and the generated sandbox profile grants mise's trees so a sandboxed pi finds its runtime. |
@@ -66,20 +66,20 @@ bun start
 ```bash
 cradle --version
 cradle doctor                         # check pi (required), nono/sbx/mise (recommended) on PATH, with versions
-cradle start ./my-agent               # run an agent folder with pi; sandboxed when sandbox/nono.json or sandbox/sbx.json exists
-cradle start my-agent                 # run a name from ~/.cradle/settings.json instead of a path
-cradle start . --offline              # block all outbound network (exfil protection)
-cradle start . --allow-host api.example.com  # restrict network to these hosts (repeatable)
-cradle start . --sandbox-backend sbx  # run under the sbx Docker Sandboxes microVM instead of nono
-cradle start . --no-sandbox           # run pi directly (debug)
-cradle start . --dry-run -- --resume  # print the write plan + command; forward `--resume` to pi
+cradle run ./my-agent               # run an agent folder with pi; sandboxed when sandbox/nono.json or sandbox/sbx.json exists
+cradle run my-agent                 # run a name from ~/.cradle/settings.json instead of a path
+cradle run . --offline              # block all outbound network (exfil protection)
+cradle run . --allow-host api.example.com  # restrict network to these hosts (repeatable)
+cradle run . --sandbox-backend sbx  # run under the sbx Docker Sandboxes microVM instead of nono
+cradle run . --no-sandbox           # run pi directly (debug)
+cradle run . --dry-run -- --resume  # print the write plan + command; forward `--resume` to pi
 ```
 
 The agent runs in _your_ working directory; the agent folder is a parameter (default `.`). Everything after `--` is forwarded verbatim to pi. `--dry-run` prints the generated-extension write plan and the composed command without spawning (and without requiring the bins to be installed). Per-agent state (generated extensions + session history) lives under `~/.cradle/agents/<name>-<hash>/`.
 
 ### Global agent aliases (`~/.cradle/settings.json`)
 
-The `dir` positional accepts a bare name instead of a path — `cradle start my-agent` resolves against a global name → folder map, so agent folders you keep far from any project don't need a full path from every cwd:
+The `dir` positional accepts a bare name instead of a path — `cradle run my-agent` resolves against a global name → folder map, so agent folders you keep far from any project don't need a full path from every cwd:
 
 ```json
 {

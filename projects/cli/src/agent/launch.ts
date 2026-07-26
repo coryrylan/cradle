@@ -2,7 +2,7 @@
 // (system prompt, generated extensions, skills, model settings, session dir),
 // optionally wrapped in `nono run` for the `'nono'` backend. The `'sbx'`
 // backend's `sbx exec` wrapper is composed later, at materialization in
-// `commands/start.ts` — out of scope here, see `LaunchSpec.backend`. Also
+// `commands/run.ts` — out of scope here, see `LaunchSpec.backend`. Also
 // composes the spawn env — see `composeEnv` for cradle's single deliberate
 // env-var exception.
 
@@ -17,9 +17,9 @@ export interface LaunchSpec {
   /**
    * Where the generated providers extension is written (see
    * `folder.providersJson`) and where `--session-dir` points, sourced from the
-   * plan's own `extensionsDir`/`sessionsDir` (`commands/start.ts` — the single
+   * plan's own `extensionsDir`/`sessionsDir` (`commands/run.ts` — the single
    * derivation site; re-deriving from `stateDir` here risks silently
-   * disagreeing with a plan whose dirs were overridden after `planStart`).
+   * disagreeing with a plan whose dirs were overridden after `planRun`).
    */
   readonly extensionsDir: string;
   readonly sessionsDir: string;
@@ -31,7 +31,7 @@ export interface LaunchSpec {
   /**
    * Which sandbox backend wraps this run, or `null` for unsandboxed. `'nono'`
    * wraps the argv here — see `composeArgv`. `'sbx'` does NOT wrap here: its
-   * `sbx exec` wrapper is composed at materialization in `commands/start.ts`,
+   * `sbx exec` wrapper is composed at materialization in `commands/run.ts`,
    * so `composeArgv` returns the bare pi argv for both `'sbx'` and `null`.
    * For `'sbx'`, `piBin` is the literal `pi` — resolved on the guest's PATH,
    * since host paths (mise-shim included) are meaningless inside the
@@ -62,7 +62,7 @@ export interface LaunchSpec {
   /**
    * Abs paths of the pi extension entry files resolved from settings.json's
    * `packages` (see `./packages.js`), installed into `<stateDir>/npm` by
-   * `commands/start.ts`. Absent/empty on the argv-only preview used for
+   * `commands/run.ts`. Absent/empty on the argv-only preview used for
    * `--dry-run` (packages resolve at install time, after the preview is
    * printed) and on folders that declare no packages.
    */
@@ -129,10 +129,10 @@ export function composePiArgv(spec: LaunchSpec): string[] {
  * at a private cache inside the already-granted state dir instead lets mise
  * cache writes succeed (no warnings, working cache) while the shared host
  * cache stays untouched; mise creates the directory itself, cradle never
- * pre-creates or wipes it. Unsandboxed runs return `{}` and keep the shared
+ * pre-creates or wipes it. Unsandboxed runs produce `{}` and keep the shared
  * host cache — no override needed since there's no sandbox denial to work
  * around; the sbx guest has no mise at all, and its HOME override rides the
- * `sbx exec` argv composed in `commands/start.ts` rather than env, so the
+ * `sbx exec` argv composed in `commands/run.ts` rather than env, so the
  * argv-only rule holds there too.
  *
  * This deliberately overrides any user-set `MISE_CACHE_DIR` for sandboxed
@@ -153,7 +153,7 @@ export function composeEnv(spec: LaunchSpec): Record<string, string> {
  * Build the argv for `nono run … -- pi …` when `spec.backend` is `'nono'`, or
  * the bare pi argv otherwise (`'sbx'` or `null`) — the `'sbx'` backend's own
  * `sbx exec` wrapper is composed later, at materialization in
- * `commands/start.ts`, not here (see `LaunchSpec.backend`).
+ * `commands/run.ts`, not here (see `LaunchSpec.backend`).
  *
  * All filesystem grants (cwd, agent dir, state dir, and the agent's own
  * `sandbox/nono.json` entries) AND the network posture live inside the

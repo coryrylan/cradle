@@ -85,7 +85,7 @@ describe('runInstall', () => {
   });
 
   it('throws a named error naming the command and exit code on a non-zero exit', async () => {
-    await expect(runInstall(['false'], dir)).rejects.toThrow('package install failed (false exited 1)');
+    await expect(runInstall(['false'], dir)).rejects.toThrow('Package install failed (false exited 1)');
   });
 
   it('runs the command in the given cwd', async () => {

@@ -26,7 +26,7 @@ The agent's role, instructions, and personality in Markdown — pi's system-prom
 - **`SYSTEM.md`** _replaces_ pi's default coding-assistant prompt (`--system-prompt <path>`) — use it when the agent shouldn't carry pi's built-in assistant framing. Context files and skills are still appended by pi.
 - **`APPEND_SYSTEM.md`** _appends_ to pi's default prompt (`--append-system-prompt <path>`) — use it to layer role and instructions on top of the built-in framing.
 
-pi can't discover either file in an arbitrary folder on its own, so cradle passes the paths explicitly. A folder may ship both: cradle passes both flags, and pi uses `SYSTEM.md` as the base with `APPEND_SYSTEM.md` appended. A folder with neither means the directory isn't an agent, and `cradle start` fails with a pointer to this page.
+pi can't discover either file in an arbitrary folder on its own, so cradle passes the paths explicitly. A folder may ship both: cradle passes both flags, and pi uses `SYSTEM.md` as the base with `APPEND_SYSTEM.md` appended. A folder with neither means the directory isn't an agent, and `cradle run` fails with a pointer to this page.
 
 ## settings.json
 

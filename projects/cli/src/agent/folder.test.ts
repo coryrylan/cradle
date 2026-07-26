@@ -107,7 +107,7 @@ describe('loadAgentFolder', () => {
 
   it('should reject a folder with neither SYSTEM.md nor APPEND_SYSTEM.md, naming the dir', async () => {
     await expect(loadAgentFolder(dir)).rejects.toThrow(
-      `not an agent folder: ${dir} (needs SYSTEM.md or APPEND_SYSTEM.md`
+      `Not an agent folder: ${dir} (needs SYSTEM.md or APPEND_SYSTEM.md`
     );
   });
 
@@ -117,7 +117,7 @@ describe('loadAgentFolder', () => {
   });
 
   it('should reject a missing directory with a friendly error', async () => {
-    await expect(loadAgentFolder(join(dir, 'nope'))).rejects.toThrow(`agent folder not found: ${join(dir, 'nope')}`);
+    await expect(loadAgentFolder(join(dir, 'nope'))).rejects.toThrow(`Agent folder not found: ${join(dir, 'nope')}`);
   });
 
   describe('settings.json', () => {
@@ -411,7 +411,10 @@ describe('loadAgentFolder', () => {
 
     it('should trim allow_domain entries so stray whitespace never reaches the profile', async () => {
       await appendSystemMd();
-      await addFile('sandbox/nono.json', JSON.stringify({ network: { allow_domain: ['api.example.com ', ' localhost'] } }));
+      await addFile(
+        'sandbox/nono.json',
+        JSON.stringify({ network: { allow_domain: ['api.example.com ', ' localhost'] } })
+      );
       const folder = await loadAgentFolder(dir);
       expect(folder.sandbox.network).toEqual({ allowDomain: ['api.example.com', 'localhost'] });
       expect(folder.warnings).toEqual([]);

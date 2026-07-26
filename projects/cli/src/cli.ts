@@ -7,7 +7,7 @@ import yargs from 'yargs';
 import pkg from '../package.json' with { type: 'json' };
 import { composeArgv, composeEnv } from './agent/launch.js';
 import { doctorExitCode, formatDoctorReport, runDoctor } from './commands/doctor.js';
-import { materializeStart, planStart, type StartFlags, type StartPlan } from './commands/start.js';
+import { materializeRun, planRun, type RunFlags, type RunPlan } from './commands/run.js';
 import { composeSbxExecArgv } from './sbx/compose.js';
 import { quoteCommandPart } from './setup/utils.js';
 import { styleWarning } from './util/style.js';
@@ -33,7 +33,7 @@ cli.command(
 );
 
 cli.command(
-  'start [dir]',
+  'run [dir]',
   'run an agent folder with pi, sandboxed when sandbox/nono.json or sandbox/sbx.json is present',
   builder =>
     builder
@@ -76,7 +76,7 @@ cli.command(
   async argv => {
     const passthrough = ((argv['--'] as readonly unknown[] | undefined) ?? []).map(String);
     const allowHost = ((argv.allowHost as readonly unknown[] | undefined) ?? []).map(String);
-    const flags: StartFlags = {
+    const flags: RunFlags = {
       dir: argv.dir,
       dryRun: argv.dryRun,
       ...(argv.sandbox !== undefined ? { noSandbox: !argv.sandbox } : {}),
@@ -86,7 +86,7 @@ cli.command(
       ...(argv.verbose ? { verbose: true } : {}),
       ...(passthrough.length ? { passthrough } : {})
     };
-    await runStart(flags);
+    await executeRun(flags);
   }
 );
 
@@ -103,15 +103,15 @@ cli.command(
 
 // Every failure exits with the one-line message pattern; a rejection escaping a
 // yargs handler would print the full usage dump plus a stack trace instead.
-async function runStart(flags: StartFlags): Promise<void> {
+async function executeRun(flags: RunFlags): Promise<void> {
   try {
-    const plan = await planStart(flags, { tty: process.stdout.isTTY === true });
+    const plan = await planRun(flags, { tty: process.stdout.isTTY });
     printWarnings(plan.warnings);
     if (plan.dryRun) {
       printDryRun(plan);
       return;
     }
-    const result = await materializeStart(plan, {
+    const result = await materializeRun(plan, {
       install: runInstall,
       run: runCapture,
       readPiVersion: readBinVersion
@@ -125,7 +125,7 @@ async function runStart(flags: StartFlags): Promise<void> {
   }
 }
 
-function printDryRun(plan: StartPlan): void {
+function printDryRun(plan: RunPlan): void {
   for (const file of plan.files) console.log(`write: ${join(plan.extensionsDir, file.rel)}`);
   if (plan.profile !== null) console.log(`write: ${plan.profile.path}`);
   if (plan.sbx !== null) printSbxPlan(plan.sbx);
@@ -143,7 +143,7 @@ function printDryRun(plan: StartPlan): void {
 // materialize will run, in order. Provision prints unpinned; materialize
 // re-pins it to the host pi version (same precedent as the package `-e`
 // entries below, which also resolve after the preview prints).
-function printSbxPlan(sbx: NonNullable<StartPlan['sbx']>): void {
+function printSbxPlan(sbx: NonNullable<RunPlan['sbx']>): void {
   console.log(`create: ${sbx.createArgv.map(quoteCommandPart).join(' ')}`);
   for (const argv of sbx.policyArgvs) console.log(`policy: ${argv.map(quoteCommandPart).join(' ')}`);
   console.log(`provision: ${sbx.provisionArgv.map(quoteCommandPart).join(' ')}`);
@@ -151,14 +151,14 @@ function printSbxPlan(sbx: NonNullable<StartPlan['sbx']>): void {
 
 // Dry-run never installs; the printed argv legitimately omits the package `-e`
 // entries below — they resolve at install time, after this preview prints.
-function printPackagesPlan(packages: NonNullable<StartPlan['packages']>): void {
+function printPackagesPlan(packages: NonNullable<RunPlan['packages']>): void {
   console.log(`write: ${join(packages.npmDir, 'package.json')}`);
   const specSummary = packages.specs.map(spec => `${spec.name}@${spec.version}`).join(', ');
   console.log(`install: ${packages.installCommand.join(' ')} (${packages.npmDir}): ${specSummary}`);
 }
 
 function printWarnings(warnings: readonly string[]): void {
-  const stderrTty = process.stderr.isTTY === true;
+  const stderrTty = process.stderr.isTTY;
   for (const warning of warnings) console.error(styleWarning(`warning: ${warning}`, stderrTty));
 }
 

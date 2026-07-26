@@ -8,7 +8,7 @@
 
 # Aliases
 
-`cradle start <ref>` accepts a bare name instead of a path. A bare name is looked up in a global name → folder map at `~/.cradle/settings.json`, so agents you keep far from any project don't need a full path from every working directory:
+`cradle run <ref>` accepts a bare name instead of a path. A bare name is looked up in a global name → folder map at `~/.cradle/settings.json`, so agents you keep far from any project don't need a full path from every working directory:
 
 ```json
 {
@@ -18,7 +18,7 @@
 }
 ```
 
-With that in place, `cradle start my-agent` works from anywhere.
+With that in place, `cradle run my-agent` works from anywhere.
 
 ## Resolution
 
@@ -29,7 +29,7 @@ With that in place, `cradle start my-agent` works from anywhere.
 
 A bare name is anything without a path separator that doesn't start with `.` or `~`. Anything already path-shaped skips the alias table entirely.
 
-The alias resolves to an absolute path before the agent folder loads, so folder loading, the state dir, the generated `nono` profile, and the composed command are all untouched — `cradle start my-agent` and `cradle start ~/dev/agents/my-agent/` share the same state dir and agent ID.
+The alias resolves to an absolute path before the agent folder loads, so folder loading, the state dir, the generated `nono` profile, and the composed command are all untouched — `cradle run my-agent` and `cradle run ~/dev/agents/my-agent/` share the same state dir and agent ID.
 
 ## Shadowing
 

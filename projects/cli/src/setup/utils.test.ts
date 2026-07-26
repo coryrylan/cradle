@@ -31,7 +31,7 @@ describe('parseJson', () => {
 
 describe('small helpers', () => {
   it('getErrorMessage unwraps Error and stringifies the rest', () => {
-    expect(getErrorMessage(new Error('boom'))).toBe('boom');
+    expect(getErrorMessage(new Error('Boom'))).toBe('Boom');
     expect(getErrorMessage('plain')).toBe('plain');
   });
 

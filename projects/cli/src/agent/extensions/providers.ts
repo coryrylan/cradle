@@ -1,6 +1,6 @@
 import { rewriteLocalhostBaseUrl } from '../../sbx/compose.js';
 
-/** Options for `emitProvidersExtension` — see `commands/start.ts`'s `emitExtensionFiles`, the single call site. */
+/** Options for `emitProvidersExtension` — see `commands/run.ts`'s `emitExtensionFiles`, the single call site. */
 export interface ProvidersEmitOptions {
   /**
    * Rewrite `localhost`/`127.0.0.1` provider baseUrls to the sbx host gateway

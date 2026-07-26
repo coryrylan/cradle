@@ -1,4 +1,4 @@
-// ANSI styling for `cradle start`'s startup lines, so real warnings are visually distinct.
+// ANSI styling for `cradle run`'s startup lines, so real warnings are visually distinct.
 // Styling is TTY-gated: piped output stays byte-clean for tests and tooling.
 
 /** Yellow when `isTty` — a real warning, printed to stderr. */

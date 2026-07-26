@@ -37,7 +37,7 @@ export function requireBin(bin: string, which: WhichFn = defaultWhich): string {
   const path = lookupBin(bin, which);
   if (!path) {
     throw new Error(
-      `required executable "${bin}" not found on PATH — install it, then run \`cradle doctor\` to verify`
+      `Required executable "${bin}" not found on PATH — install it, then run \`cradle doctor\` to verify`
     );
   }
   return path;

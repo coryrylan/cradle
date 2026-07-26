@@ -135,13 +135,13 @@ describe('resolveAgentRef', () => {
   it('should throw naming both misses, listing known agents', async () => {
     await writeSettings({ agents: { alpha: { path: '/a' }, beta: { path: '/b' } } });
     await expect(resolveAgentRef('nope', { home, cwd })).rejects.toThrow(
-      `agent folder not found: ${join(cwd, 'nope')} — and no "agents.nope" entry in ${settingsPath()} (known agents: alpha, beta)`
+      `Agent folder not found: ${join(cwd, 'nope')} — and no "agents.nope" entry in ${settingsPath()} (known agents: alpha, beta)`
     );
   });
 
   it('should drop the known-agents clause when the table is empty', async () => {
     await expect(resolveAgentRef('nope', { home, cwd })).rejects.toThrow(
-      `agent folder not found: ${join(cwd, 'nope')} — and no "agents.nope" entry in ${settingsPath()}`
+      `Agent folder not found: ${join(cwd, 'nope')} — and no "agents.nope" entry in ${settingsPath()}`
     );
   });
 

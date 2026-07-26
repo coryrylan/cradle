@@ -2,7 +2,7 @@
 // extension mechanism (`"packages": ["npm:pi-example-tool"]`). Agent runs pass
 // `--no-extensions`, so pi's own package loader never runs for them; cradle
 // resolves the declared npm: sources itself into a per-agent npm project (see
-// `commands/start.ts`'s `PackagesPlan`) and passes each installed package's
+// `commands/run.ts`'s `PackagesPlan`) and passes each installed package's
 // declared entry files as explicit `-e` flags instead — pi loads explicit
 // `-e` paths even under `--no-extensions`.
 

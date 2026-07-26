@@ -24,18 +24,18 @@ my-agent/
 Every supported file uses a pi-native or cross-tool-standard name. The folder mirrors the layout of pi's own agent dir — `~/.pi/agent/` holds the same `SYSTEM.md`, `APPEND_SYSTEM.md`, `settings.json`, `models.json`, `skills/`, and `extensions/` — so anything written for a personal pi config drops in unchanged. The mirror is layout-deep, not key-deep: `settings.json` keys cradle can't deliver over argv (`theme`, `quietStartup`, …) have no effect in an agent folder and warn at start — see [`settings.json`](#settingsjson).
 
 ```sh
-cradle start ./my-agent                        # launch pi as this agent; sandboxed when sandbox/nono.json or sandbox/sbx.json exists
-cradle start ./my-agent --dry-run              # print the write plan + full command
-cradle start ./my-agent --sandbox              # force sandboxing on (nono by default)
-cradle start ./my-agent --sandbox-backend sbx  # force sandboxing on the sbx microVM backend
-cradle start ./my-agent -- -p "prompt"         # everything after -- is forwarded to pi
+cradle run ./my-agent                        # launch pi as this agent; sandboxed when sandbox/nono.json or sandbox/sbx.json exists
+cradle run ./my-agent --dry-run              # print the write plan + full command
+cradle run ./my-agent --sandbox              # force sandboxing on (nono by default)
+cradle run ./my-agent --sandbox-backend sbx  # force sandboxing on the sbx microVM backend
+cradle run ./my-agent -- -p "prompt"         # everything after -- is forwarded to pi
 ```
 
 The agent runs in _your_ working directory (the target project); the agent folder is a parameter. Per-agent runtime state lives outside the folder in `~/.cradle/agents/<name>-<hash>/` (generated extensions + session history), so the source folder stays clean and committable.
 
 ## Global agent aliases
 
-`cradle start <ref>` also accepts a bare name instead of a path. A bare name (no `/`, not `.`/`~`-led — see the resolution table below) is looked up in a global name → folder map at `~/.cradle/settings.json`, so `cradle start my-agent` works from any cwd instead of requiring a full path:
+`cradle run <ref>` also accepts a bare name instead of a path. A bare name (no `/`, not `.`/`~`-led — see the resolution table below) is looked up in a global name → folder map at `~/.cradle/settings.json`, so `cradle run my-agent` works from any cwd instead of requiring a full path:
 
 ```json
 {
@@ -50,7 +50,7 @@ The agent runs in _your_ working directory (the target project); the agent folde
 | `my-agent`                                 | alias table first; falls back to the relative path `./my-agent` only when no alias is defined |
 | `./my-agent`, `../x`, `/abs/x`, `~/x`, `.` | always a path — never an alias lookup                                                         |
 
-The alias resolves to an absolute path before `loadAgentFolder` sees it, so folder loading, the state dir, the generated nono profile, and argv composition are all untouched — `cradle start my-agent` and `cradle start ~/dev/agents/my-agent/` share the same state dir and `agentId`. When an alias shadows a same-named directory in your cwd, cradle warns and points at `./my-agent` as the escape hatch; when a bare name matches no alias and no cwd-relative directory either, the error names both misses.
+The alias resolves to an absolute path before `loadAgentFolder` sees it, so folder loading, the state dir, the generated nono profile, and argv composition are all untouched — `cradle run my-agent` and `cradle run ~/dev/agents/my-agent/` share the same state dir and `agentId`. When an alias shadows a same-named directory in your cwd, cradle warns and points at `./my-agent` as the escape hatch; when a bare name matches no alias and no cwd-relative directory either, the error names both misses.
 
 **Config is not state.** `~/.cradle/settings.json`'s path derives from `home` only, entirely apart from `CRADLE_STATE_DIR` (which only ever means the state root described above, never the alias table) — redirecting where session history lives never silently moves where aliases are read from. The filename collides with an agent folder's own pi-native `settings.json`, but they are different files with different schema authorities: cradle owns the global one, so unknown keys there warn as schema errors; an agent folder's `settings.json` stays pi-schema — cradle never validates pi's keys, it warns only that keys it doesn't map won't reach pi.
 
@@ -63,7 +63,7 @@ The agent's role, instructions, and personality in Markdown — pi's [system-pro
 - **`SYSTEM.md`** _replaces_ pi's default coding-assistant prompt (`--system-prompt <path>`). Use it when the agent should not carry pi's built-in assistant framing. Context files and skills are still appended by pi.
 - **`APPEND_SYSTEM.md`** _appends_ to pi's default prompt (`--append-system-prompt <path>`). Use it to layer role and instructions on top of the built-in framing.
 
-A folder may ship both — cradle passes both flags, and pi uses `SYSTEM.md` as the base with `APPEND_SYSTEM.md` appended on top. pi can't discover either file in an arbitrary folder, so cradle passes the paths explicitly; passing a flag also replaces pi's own discovery of that file, so a personal global `~/.pi/agent/SYSTEM.md` or `APPEND_SYSTEM.md` never bleeds into an agent run. A folder with neither file is not an agent; `cradle start` fails with a pointer to this spec (and a rename hint when it finds a legacy `AGENTS.md`, which maps to `APPEND_SYSTEM.md`).
+A folder may ship both — cradle passes both flags, and pi uses `SYSTEM.md` as the base with `APPEND_SYSTEM.md` appended on top. pi can't discover either file in an arbitrary folder, so cradle passes the paths explicitly; passing a flag also replaces pi's own discovery of that file, so a personal global `~/.pi/agent/SYSTEM.md` or `APPEND_SYSTEM.md` never bleeds into an agent run. A folder with neither file is not an agent; `cradle run` fails with a pointer to this spec (and a rename hint when it finds a legacy `AGENTS.md`, which maps to `APPEND_SYSTEM.md`).
 
 ### `settings.json`
 

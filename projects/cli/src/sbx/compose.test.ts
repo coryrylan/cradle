@@ -235,7 +235,9 @@ describe('composeSbxPolicyArgvs', () => {
   });
 
   it('should dedupe host.docker.internal when both localhost and 127.0.0.1 are present', () => {
-    const argvs = composeSbxPolicyArgvs(spec({ network: { allowDomain: ['localhost', '127.0.0.1', 'api.example.com'] } }));
+    const argvs = composeSbxPolicyArgvs(
+      spec({ network: { allowDomain: ['localhost', '127.0.0.1', 'api.example.com'] } })
+    );
     expect(argvs).toEqual([
       [
         'sbx',

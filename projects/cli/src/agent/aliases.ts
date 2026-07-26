@@ -1,4 +1,4 @@
-// Resolves a `cradle start <ref>` reference into an agent folder path before
+// Resolves a `cradle run <ref>` reference into an agent folder path before
 // `folder.ts` loads it. A bare name (no path separators, not dot/tilde-led)
 // is looked up in the global alias table at `<home>/.cradle/settings.json`;
 // anything path-shaped (`./x`, `../x`, `/abs`, `~/x`, `.`) is never an alias
@@ -30,11 +30,11 @@ export interface ResolveRefDeps {
 const BARE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /**
- * Resolve a `cradle start` ref into a folder path `loadAgentFolder` can load.
+ * Resolve a `cradle run` ref into a folder path `loadAgentFolder` can load.
  * Path-shaped refs pass through untouched (`loadAgentFolder`'s own `resolve()`
  * handles them, and they never consult `deps.cwd`); a bare name resolves
  * against the global alias table into an ABSOLUTE, normalized path, falling
- * back to the cwd-relative folder when no alias matches (so `cradle start
+ * back to the cwd-relative folder when no alias matches (so `cradle run
  * hello` from `examples/` keeps working) — and throwing only when neither
  * resolves. Every bare-name branch resolves against the injected `deps.cwd`,
  * never `process.cwd()`, so the dep is the single source of truth for what the
@@ -140,5 +140,5 @@ function shadowWarning(ref: string, dir: string): string {
 /** Neither an alias nor a cwd-relative directory resolved — the one case this module throws. */
 function bothMissedMessage(ref: string, localDir: string, settingsPath: string, aliases: Map<string, string>): string {
   const known = aliases.size > 0 ? ` (known agents: ${[...aliases.keys()].join(', ')})` : '';
-  return `agent folder not found: ${localDir} — and no "agents.${ref}" entry in ${settingsPath}${known}`;
+  return `Agent folder not found: ${localDir} — and no "agents.${ref}" entry in ${settingsPath}${known}`;
 }

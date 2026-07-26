@@ -23,7 +23,7 @@ async function runCli(args: string[], env: Record<string, string> = {}): Promise
   return { stdout, stderr, exitCode };
 }
 
-describe('start command', () => {
+describe('run command', () => {
   let root: string;
   let agentDir: string;
   let env: Record<string, string>;
@@ -45,7 +45,7 @@ describe('start command', () => {
       join(agentDir, 'models.json'),
       JSON.stringify({ providers: { ollama: { baseUrl: 'http://x/v1' } } })
     );
-    const { stdout, exitCode } = await runCli(['start', agentDir, '--dry-run'], env);
+    const { stdout, exitCode } = await runCli(['run', agentDir, '--dry-run'], env);
     const lines = stdout.trim().split('\n');
     expect(lines.some(line => line.startsWith('write: ') && line.endsWith('providers.ts'))).toBe(true);
     expect(lines.some(line => line.startsWith('write: ') && line.endsWith('agent-browser-nono-fallback.ts'))).toBe(
@@ -70,7 +70,7 @@ describe('start command', () => {
 
   it('should fall back to bare pi and warn when sandbox/nono.json is absent', async () => {
     await rm(join(agentDir, 'sandbox'), { recursive: true });
-    const { stdout, stderr, exitCode } = await runCli(['start', agentDir, '--dry-run'], env);
+    const { stdout, stderr, exitCode } = await runCli(['run', agentDir, '--dry-run'], env);
     expect(stdout.trim().split('\n').at(-1)?.startsWith('pi --append-system-prompt')).toBe(true);
     expect(stdout).not.toContain('agent-browser-nono-fallback.ts');
     expect(stderr).toContain('sandbox/nono.json or sbx.json not found');
@@ -79,7 +79,7 @@ describe('start command', () => {
 
   it('should force the sandbox on with --sandbox when sandbox/nono.json is absent', async () => {
     await rm(join(agentDir, 'sandbox'), { recursive: true });
-    const { stdout, exitCode } = await runCli(['start', agentDir, '--dry-run', '--sandbox'], env);
+    const { stdout, exitCode } = await runCli(['run', agentDir, '--dry-run', '--sandbox'], env);
     const lines = stdout.trim().split('\n');
     expect(lines.some(line => line.startsWith('write: ') && line.endsWith('nono-profile.json'))).toBe(true);
     expect(lines.at(-1)).toContain('/mise-cache nono run --silent --profile ');
@@ -93,14 +93,14 @@ describe('start command', () => {
       JSON.stringify({ agents: { hello: { path: agentDir } } }),
       'utf8'
     );
-    const { stdout, exitCode } = await runCli(['start', 'hello', '--dry-run'], { ...env, HOME: root });
+    const { stdout, exitCode } = await runCli(['run', 'hello', '--dry-run'], { ...env, HOME: root });
     const command = stdout.trim().split('\n').at(-1) ?? '';
     expect(command).toContain(`--append-system-prompt ${join(agentDir, 'APPEND_SYSTEM.md')}`);
     expect(exitCode).toBe(0);
   });
 
   it("omits --silent with --verbose to show nono's full capabilities banner", async () => {
-    const { stdout, exitCode } = await runCli(['start', agentDir, '--dry-run', '--verbose'], env);
+    const { stdout, exitCode } = await runCli(['run', agentDir, '--dry-run', '--verbose'], env);
     const command = stdout.trim().split('\n').at(-1) ?? '';
     expect(command.startsWith('MISE_CACHE_DIR=')).toBe(true);
     expect(command).toContain('/mise-cache nono run --profile ');
@@ -109,7 +109,7 @@ describe('start command', () => {
   });
 
   it('drops the nono wrapper with --no-sandbox', async () => {
-    const { stdout, exitCode } = await runCli(['start', agentDir, '--dry-run', '--no-sandbox'], env);
+    const { stdout, exitCode } = await runCli(['run', agentDir, '--dry-run', '--no-sandbox'], env);
     const lines = stdout.trim().split('\n');
     const command = lines.at(-1) ?? '';
     expect(command.startsWith('pi --append-system-prompt')).toBe(true);
@@ -121,7 +121,7 @@ describe('start command', () => {
   });
 
   it('bakes --offline into the network posture and forwards args after `--` to pi', async () => {
-    const { stdout, exitCode } = await runCli(['start', agentDir, '--dry-run', '--offline', '--', '--resume'], env);
+    const { stdout, exitCode } = await runCli(['run', agentDir, '--dry-run', '--offline', '--', '--resume'], env);
     const command = stdout.trim().split('\n').at(-1) ?? '';
     // Network policy lives in the generated profile now, never as a nono flag.
     expect(command).not.toContain('--block-net');
@@ -133,7 +133,7 @@ describe('start command', () => {
 
   it('forwards numeric-looking passthrough tokens after `--` to pi verbatim, not yargs-coerced', async () => {
     const { stdout, exitCode } = await runCli(
-      ['start', agentDir, '--dry-run', '--', '--temperature', '1.10', '08', '2.0', '1e3'],
+      ['run', agentDir, '--dry-run', '--', '--temperature', '1.10', '08', '2.0', '1e3'],
       env
     );
     const command = stdout.trim().split('\n').at(-1) ?? '';
@@ -144,7 +144,7 @@ describe('start command', () => {
 
   it('bakes --allow-host into the network allowlist via the generated profile', async () => {
     const { stdout, exitCode } = await runCli(
-      ['start', agentDir, '--dry-run', '--allow-host', 'api.example.com', '--allow-host', 'localhost'],
+      ['run', agentDir, '--dry-run', '--allow-host', 'api.example.com', '--allow-host', 'localhost'],
       env
     );
     // Network policy is disclosed by nono's startup banner, not echoed by cradle.
@@ -156,15 +156,15 @@ describe('start command', () => {
   });
 
   it('rejects a directory with neither SYSTEM.md nor APPEND_SYSTEM.md', async () => {
-    const { stderr, exitCode } = await runCli(['start', root, '--dry-run'], env);
+    const { stderr, exitCode } = await runCli(['run', root, '--dry-run'], env);
     expect(exitCode).not.toBe(0);
-    expect(stderr).toContain('not an agent folder');
+    expect(stderr).toContain('Not an agent folder');
   });
 
   it('composes pi --system-prompt for a SYSTEM.md-only folder (replaces pi’s prompt)', async () => {
     await rm(join(agentDir, 'APPEND_SYSTEM.md'));
     await writeFile(join(agentDir, 'SYSTEM.md'), '# Role\n', 'utf8');
-    const { stdout, exitCode } = await runCli(['start', agentDir, '--dry-run', '--no-sandbox'], env);
+    const { stdout, exitCode } = await runCli(['run', agentDir, '--dry-run', '--no-sandbox'], env);
     const command = stdout.trim().split('\n').at(-1) ?? '';
     expect(command.startsWith(`pi --system-prompt ${join(agentDir, 'SYSTEM.md')}`)).toBe(true);
     expect(command).not.toContain('--append-system-prompt');
@@ -173,7 +173,7 @@ describe('start command', () => {
 
   it('surfaces folder warnings on stderr without failing the run', async () => {
     await writeFile(join(agentDir, 'notes.txt'), '', 'utf8');
-    const { stderr, exitCode } = await runCli(['start', agentDir, '--dry-run'], env);
+    const { stderr, exitCode } = await runCli(['run', agentDir, '--dry-run'], env);
     expect(stderr).toContain('warning:');
     expect(stderr).toContain('notes.txt');
     expect(exitCode).toBe(0);
@@ -186,7 +186,7 @@ describe('start command', () => {
     await writeFile(fakePi, '#!/bin/sh\necho "PI_ARGS:$@"\nexit 7\n', 'utf8');
     await chmod(fakePi, 0o755);
 
-    const { stdout, exitCode } = await runCli(['start', agentDir, '--no-sandbox'], {
+    const { stdout, exitCode } = await runCli(['run', agentDir, '--no-sandbox'], {
       ...env,
       PATH: `${fakeBin}:${process.env.PATH ?? ''}`
     });
@@ -206,13 +206,13 @@ describe('start command', () => {
     const blocker = join(root, 'state-blocker');
     await writeFile(blocker, '', 'utf8');
 
-    const { stderr, exitCode } = await runCli(['start', agentDir, '--no-sandbox'], {
+    const { stderr, exitCode } = await runCli(['run', agentDir, '--no-sandbox'], {
       ...env,
       CRADLE_STATE_DIR: blocker,
       PATH: `${fakeBin}:${process.env.PATH ?? ''}`
     });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain('failed to write agent extensions');
+    expect(stderr).toContain('Failed to write agent extensions');
     expect(stderr).not.toContain('Usage:');
     expect(stderr).not.toMatch(/\n\s+at /);
   });
@@ -220,7 +220,7 @@ describe('start command', () => {
   it('honors a folder-level "sandbox": false opt-out and warns loudly on stderr', async () => {
     await mkdir(join(agentDir, 'sandbox'), { recursive: true });
     await writeFile(join(agentDir, 'sandbox', 'nono.json'), JSON.stringify({ sandbox: false }));
-    const { stdout, stderr, exitCode } = await runCli(['start', agentDir, '--dry-run'], env);
+    const { stdout, stderr, exitCode } = await runCli(['run', agentDir, '--dry-run'], env);
     const command = stdout.trim().split('\n').at(-1) ?? '';
     expect(command.startsWith('pi --append-system-prompt')).toBe(true);
     expect(command).not.toContain('nono');
@@ -231,7 +231,7 @@ describe('start command', () => {
   it('lets an explicit --sandbox flag override the folder opt-out', async () => {
     await mkdir(join(agentDir, 'sandbox'), { recursive: true });
     await writeFile(join(agentDir, 'sandbox', 'nono.json'), JSON.stringify({ sandbox: false }));
-    const { stdout, exitCode } = await runCli(['start', agentDir, '--dry-run', '--sandbox'], env);
+    const { stdout, exitCode } = await runCli(['run', agentDir, '--dry-run', '--sandbox'], env);
     const command = stdout.trim().split('\n').at(-1) ?? '';
     expect(command.startsWith('MISE_CACHE_DIR=')).toBe(true);
     expect(command).toContain('/mise-cache nono run --silent --profile ');
@@ -241,7 +241,7 @@ describe('start command', () => {
   it('does not echo agent sandbox grants on stdout (disclosed by nono banner instead)', async () => {
     await mkdir(join(agentDir, 'sandbox'), { recursive: true });
     await writeFile(join(agentDir, 'sandbox', 'nono.json'), JSON.stringify({ filesystem: { write: ['~/out'] } }));
-    const { stdout, exitCode } = await runCli(['start', agentDir, '--dry-run'], env);
+    const { stdout, exitCode } = await runCli(['run', agentDir, '--dry-run'], env);
     expect(stdout).not.toContain('sandbox grant:');
     // The profile is written and contains the grant.
     expect(stdout).toContain('write: ');
@@ -251,7 +251,7 @@ describe('start command', () => {
 
   it('prints the packages install plan on --dry-run when settings.json declares packages', async () => {
     await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ packages: ['npm:pi-example-tool'] }), 'utf8');
-    const { stdout, exitCode } = await runCli(['start', agentDir, '--dry-run'], env);
+    const { stdout, exitCode } = await runCli(['run', agentDir, '--dry-run'], env);
     const lines = stdout.trim().split('\n');
     expect(lines.some(line => line.startsWith('write: ') && line.endsWith(join('npm', 'package.json')))).toBe(true);
     expect(
@@ -269,7 +269,7 @@ describe('start command', () => {
       join(agentDir, 'sandbox', 'nono.json'),
       JSON.stringify({ unsafe_macos_seatbelt_rules: ['(allow mach-register)', '(allow iokit-open)'] })
     );
-    const { stdout, exitCode } = await runCli(['start', agentDir, '--dry-run'], env);
+    const { stdout, exitCode } = await runCli(['run', agentDir, '--dry-run'], env);
     expect(stdout).not.toContain('sandbox rule:');
     // The profile is written and contains the rules.
     expect(stdout).toContain('write: ');
@@ -291,7 +291,7 @@ describe('doctor command', () => {
 describe('default command', () => {
   it('shows help when no command is given', async () => {
     const { stdout, exitCode } = await runCli([]);
-    expect(stdout).toContain('start [dir]');
+    expect(stdout).toContain('run [dir]');
     expect(stdout).toContain('doctor');
     expect(stdout).not.toContain('setup');
     expect(stdout).toContain('<cmd>');
@@ -303,7 +303,7 @@ describe('default command', () => {
 describe('--help flag', () => {
   it('prints help and exits 0', async () => {
     const { stdout, exitCode } = await runCli(['--help']);
-    expect(stdout).toContain('start [dir]');
+    expect(stdout).toContain('run [dir]');
     expect(stdout).toContain('--help');
     expect(exitCode).toBe(0);
   });

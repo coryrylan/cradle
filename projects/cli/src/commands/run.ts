@@ -1,8 +1,8 @@
-// `cradle start <dir>`: load an agent folder, generate its pi extensions into
+// `cradle run <dir>`: load an agent folder, generate its pi extensions into
 // the per-agent state dir, and compose the launch — pi wrapped in `nono run`
 // for the nono backend, or run through `sbx exec` (after create/policy/
-// provision setup) for the sbx backend. Split into a pure-ish `planStart` and
-// a fs-touching `materializeStart` so the CLI can print the plan on --dry-run
+// provision setup) for the sbx backend. Split into a pure-ish `planRun` and
+// a fs-touching `materializeRun` so the CLI can print the plan on --dry-run
 // and tests can assert both halves in-process.
 
 import { exists, mkdir, rm, writeFile } from 'node:fs/promises';
@@ -36,7 +36,7 @@ import {
 import { installTree, readTextIfExists, type InstallContext, type TreeFile } from '../setup/install.js';
 import { requireBin, type WhichFn } from '../util/which.js';
 
-export interface StartFlags {
+export interface RunFlags {
   readonly dir: string;
   /** `--offline` → full network block. Overrides the folder network posture and forces the sandbox on (unless --no-sandbox). */
   readonly offline?: boolean;
@@ -52,7 +52,7 @@ export interface StartFlags {
   readonly verbose?: boolean;
 }
 
-interface StartDeps {
+interface RunDeps {
   readonly cwd?: string;
   readonly home?: string;
   readonly which?: WhichFn;
@@ -83,7 +83,7 @@ export interface PackagesPlan {
 }
 
 /**
- * The sbx backend's materialization plan: the setup argvs `materializeStart`
+ * The sbx backend's materialization plan: the setup argvs `materializeRun`
  * runs before the final `sbx exec` (composed there, wrapping the pi argv).
  * `spec.piVersion` is null at plan time — the provision argv is recomposed at
  * materialize with the host pi version (see `MaterializeDeps.readPiVersion`)
@@ -100,15 +100,15 @@ export interface SbxRunPlan {
   readonly provisionArgv: readonly string[];
 }
 
-export interface StartPlan {
+export interface RunPlan {
   /** Generated extensions, relative to `extensionsDir`. */
   readonly files: readonly TreeFile[];
   /**
    * Authoritative — the single derivation site for where generated extensions
-   * and sessions live. `materializeStart` re-asserts these onto `launch`
+   * and sessions live. `materializeRun` re-asserts these onto `launch`
    * before composing the final argv, so overriding either here (as tests do)
    * changes the composed argv accordingly instead of silently disagreeing
-   * with whatever `launch` had baked in at `planStart` time.
+   * with whatever `launch` had baked in at `planRun` time.
    */
   readonly extensionsDir: string;
   readonly sessionsDir: string;
@@ -119,7 +119,7 @@ export interface StartPlan {
   readonly sbx: SbxRunPlan | null;
   /** Settings.json `packages` resolved into an install plan; `null` when the folder declares none. */
   readonly packages: PackagesPlan | null;
-  /** The single argv source: `composeArgv(plan.launch)` — package-entry-free until `materializeStart` recomposes it with resolved package entries. */
+  /** The single argv source: `composeArgv(plan.launch)` — package-entry-free until `materializeRun` recomposes it with resolved package entries. */
   readonly launch: LaunchSpec;
   readonly dryRun: boolean;
 }
@@ -132,7 +132,7 @@ export interface StartPlan {
  * `--dry-run` only previews, so it deliberately skips the bin checks — you can
  * compose a command before nono/sbx/pi are installed.
  */
-export async function planStart(flags: StartFlags, deps: StartDeps = {}): Promise<StartPlan> {
+export async function planRun(flags: RunFlags, deps: RunDeps = {}): Promise<RunPlan> {
   const home = deps.home ?? homedir();
   const cwd = deps.cwd ?? process.cwd();
   const { dir, warnings: refWarnings } = await resolveAgentRef(flags.dir, { home, cwd });
@@ -177,7 +177,7 @@ export async function planStart(flags: StartFlags, deps: StartDeps = {}): Promis
 
 interface LaunchContext {
   readonly folder: AgentFolder;
-  readonly flags: StartFlags;
+  readonly flags: RunFlags;
   readonly backend: SandboxBackend | null;
   readonly bins: ResolvedBins;
   readonly stateDir: string;
@@ -225,7 +225,7 @@ interface ResolvedPosture {
 }
 
 /** Resolve the backend decision and the network posture together, with their combined warnings. */
-function resolvePosture(flags: StartFlags, folder: AgentFolder): ResolvedPosture {
+function resolvePosture(flags: RunFlags, folder: AgentFolder): ResolvedPosture {
   const { backend, warnings } = resolveBackend(flags, folder);
   const networkWarnings: string[] = [];
   const network = resolveNetwork(flags, folder, backend, networkWarnings);
@@ -242,7 +242,7 @@ function resolvePosture(flags: StartFlags, folder: AgentFolder): ResolvedPosture
  * (no merge) so the effective posture is always unambiguous.
  */
 function resolveNetwork(
-  flags: StartFlags,
+  flags: RunFlags,
   folder: AgentFolder,
   backend: SandboxBackend | null,
   warnings: string[]
@@ -284,7 +284,7 @@ function withUnsandboxedNetworkWarning(
 }
 
 /** `--offline`/`--allow-host` request a network posture restrictive enough to force the sandbox on. */
-function hasRestrictiveNetworkFlags(flags: StartFlags): boolean {
+function hasRestrictiveNetworkFlags(flags: RunFlags): boolean {
   return flags.offline === true || (flags.allowHost?.length ?? 0) > 0;
 }
 
@@ -300,7 +300,7 @@ interface ResolvedBackend {
  * network flags force nono on > unsandboxed default with the loud
  * no-isolation warning.
  */
-function resolveBackend(flags: StartFlags, folder: AgentFolder): ResolvedBackend {
+function resolveBackend(flags: RunFlags, folder: AgentFolder): ResolvedBackend {
   if (flags.noSandbox === true) return { backend: null, warnings: folder.warnings };
   // An explicit backend choice resolves any folder tie itself — the tie-break
   // warning (which names this very flag as the override) would be noise here.
@@ -334,7 +334,7 @@ function folderBackendPreference(folder: AgentFolder): ResolvedBackend {
 
 /** No file turned a backend on: restrictive network flags force one anyway (nono, the host-fidelity default); otherwise unsandboxed, loudly. */
 function resolveUnconfiguredBackend(
-  flags: StartFlags,
+  flags: RunFlags,
   folder: AgentFolder,
   warnings: readonly string[]
 ): ResolvedBackend {
@@ -389,8 +389,8 @@ export interface MaterializeDeps {
  * those entries appended as `-e` flags plus any resolution warnings;
  * otherwise the plan's argv is already final.
  */
-export async function materializeStart(
-  plan: StartPlan,
+export async function materializeRun(
+  plan: RunPlan,
   deps: MaterializeDeps = {}
 ): Promise<{ argv: string[]; warnings: string[] }> {
   // Sequential on purpose: installTree collects failures into ctx, and its
@@ -399,7 +399,7 @@ export async function materializeStart(
   const ctx: InstallContext = { dryRun: false, results: [], failures: [] };
   await installTree(ctx, 'extensions', plan.extensionsDir, plan.files);
   if (ctx.failures.length > 0) {
-    throw new Error(`failed to write agent extensions: ${ctx.failures.join('; ')}`);
+    throw new Error(`Failed to write agent extensions: ${ctx.failures.join('; ')}`);
   }
   await mkdir(plan.sessionsDir, { recursive: true });
   if (plan.profile !== null) {
@@ -407,11 +407,11 @@ export async function materializeStart(
     await writeFile(plan.profile.path, plan.profile.content, 'utf8');
   }
   if (plan.sbx !== null) await runSbxSetup(plan.sbx, deps);
-  // `plan.extensionsDir`/`plan.sessionsDir` are authoritative (see `StartPlan`
+  // `plan.extensionsDir`/`plan.sessionsDir` are authoritative (see `RunPlan`
   // docs): re-assert them onto `launch` here so a plan whose dirs were
-  // overridden after `planStart` still gets a composed argv that agrees with
+  // overridden after `planRun` still gets a composed argv that agrees with
   // what was actually written to disk above, instead of whatever `launch` had
-  // baked in at `planStart` time.
+  // baked in at `planRun` time.
   const launch: LaunchSpec = { ...plan.launch, extensionsDir: plan.extensionsDir, sessionsDir: plan.sessionsDir };
   const result =
     plan.packages === null
@@ -430,10 +430,10 @@ export async function materializeStart(
  */
 async function runSbxSetup(sbx: SbxRunPlan, deps: MaterializeDeps): Promise<void> {
   const run = deps.run;
-  if (run === undefined) throw new Error('sbx-backend runs need a command runner but none was provided');
+  if (run === undefined) throw new Error('An sbx-backend run needs a command runner but none was provided');
   const created = await run(sbx.createArgv);
   if (created.exitCode !== 0 && !isSbxAlreadyExistsError(created.stderr)) {
-    throw new Error(`failed to create sbx sandbox ${sbx.spec.name}: ${created.stderr.trim()}`);
+    throw new Error(`Failed to create sbx sandbox ${sbx.spec.name}: ${created.stderr.trim()}`);
   }
   for (const argv of sbx.policyArgvs) {
     await runSbxStep(run, argv, `apply sbx network policy (${sbx.spec.name})`);
@@ -447,7 +447,7 @@ async function runSbxStep(
   what: string
 ): Promise<void> {
   const result = await run(argv);
-  if (result.exitCode !== 0) throw new Error(`failed to ${what}: ${result.stderr.trim()}`);
+  if (result.exitCode !== 0) throw new Error(`Failed to ${what}: ${result.stderr.trim()}`);
 }
 
 /** Pin the guest pi install to the host's version when the reader dep is present; the plan-time (unpinned) argv otherwise. */
@@ -472,7 +472,7 @@ async function installAndResolvePackages(
   await mkdir(packages.npmDir, { recursive: true });
   if (!(await packagesUpToDate(packages.npmDir, packages.manifest))) {
     if (deps.install === undefined) {
-      throw new Error('packages declared but no installer provided');
+      throw new Error('Packages declared but no installer provided');
     }
     const manifestPath = join(packages.npmDir, 'package.json');
     await writeFile(manifestPath, packages.manifest, 'utf8');
@@ -628,7 +628,7 @@ function sandboxPlan(
   if (degenerateCwd !== undefined) {
     throw new Error(
       `cannot sandbox from ${degenerateCwd} — this directory is (or contains) nono's protected state root ` +
-        `(~/.local/state/nono) and nono refuses to start with an overlapping grant; run \`cradle start\` from a ` +
+        `(~/.local/state/nono) and nono refuses to start with an overlapping grant; run \`cradle run\` from a ` +
         `project directory instead`
     );
   }

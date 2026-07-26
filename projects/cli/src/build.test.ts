@@ -23,7 +23,7 @@ describe('embedded-resource inlining', () => {
       { cwd: PKG_ROOT, stdout: 'pipe', stderr: 'pipe' }
     );
     const code = await proc.exited;
-    if (code !== 0) throw new Error(`bun build failed: ${await new Response(proc.stderr).text()}`);
+    if (code !== 0) throw new Error(`Bun build failed: ${await new Response(proc.stderr).text()}`);
     bundle = await readFile(join(outDir, 'index.js'), 'utf8');
     outFiles = await readdir(outDir);
   });

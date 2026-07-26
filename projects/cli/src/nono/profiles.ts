@@ -111,7 +111,7 @@ export function buildProfileJson(spec: ProfileSpec): string {
       ],
       ...(unixSocketDirBind.length > 0 ? { unix_socket_dir_bind: unixSocketDirBind } : {})
     },
-    unsafe_macos_seatbelt_rules: [...(cradlePiProfile.unsafe_macos_seatbelt_rules ?? []), ...spec.rules],
+    unsafe_macos_seatbelt_rules: [...cradlePiProfile.unsafe_macos_seatbelt_rules, ...spec.rules],
     ...(network !== undefined ? { network } : {})
   };
   return JSON.stringify(profile, null, 2);

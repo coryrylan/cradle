@@ -73,7 +73,7 @@ export type AgentSandboxPosture = 'unconfigured' | 'enabled' | 'disabled';
  * The sandbox enforcement backend a folder can declare a posture for: `nono`
  * (Seatbelt/bubblewrap, `sandbox/nono.json`) or `sbx` (Docker Sandboxes
  * microVM, `sandbox/sbx.json`). Backend resolution — which one actually runs
- * — is a `commands/start.ts` concern; this module only reads each file's
+ * — is a `commands/run.ts` concern; this module only reads each file's
  * declared posture.
  */
 export type SandboxBackend = 'nono' | 'sbx';
@@ -157,7 +157,7 @@ export async function loadAgentFolder(dir: string): Promise<AgentFolder> {
   if (!hasSystem && !hasAppendSystem) {
     const renameHint = byName.has('AGENTS.md') ? ' — found AGENTS.md, rename it to APPEND_SYSTEM.md' : '';
     throw new Error(
-      `not an agent folder: ${abs} (needs SYSTEM.md or APPEND_SYSTEM.md${renameHint} — see ARCHITECTURE.md)`
+      `Not an agent folder: ${abs} (needs SYSTEM.md or APPEND_SYSTEM.md${renameHint} — see ARCHITECTURE.md)`
     );
   }
 
@@ -183,7 +183,7 @@ async function readAgentDir(abs: string): Promise<Dirent[]> {
     return await readdir(abs, { withFileTypes: true });
   } catch (error) {
     if (hasErrorCode(error, 'ENOENT') || hasErrorCode(error, 'ENOTDIR')) {
-      throw new Error(`agent folder not found: ${abs}`, { cause: error });
+      throw new Error(`Agent folder not found: ${abs}`, { cause: error });
     }
     throw error;
   }
@@ -228,7 +228,7 @@ function warnUnknownEntries(entries: readonly Dirent[], warnings: string[]): voi
  * `defaultThinkingLevel` → `--provider`/`--model`/`--thinking`) and two get
  * cradle-side handling: `packages` — pi's npm-distributed extension
  * mechanism — is resolved and installed per-agent (see `readPackageSpecs` in
- * `./packages.js` for the npm: parsing rules; `commands/start.ts` does the
+ * `./packages.js` for the npm: parsing rules; `commands/run.ts` does the
  * install + `-e` resolution), and `npmCommand` selects the installer cradle
  * shells out to for it (default `npm`). Every other key (`theme`,
  * `quietStartup`, `collapseChangelog`, …) has no delivery path — pi reads
@@ -286,7 +286,7 @@ function warnUnmappedSettingsKeys(
 }
 
 /**
- * `npmCommand`: the installer cradle shells out to (`commands/start.ts`
+ * `npmCommand`: the installer cradle shells out to (`commands/run.ts`
  * appends `install`) — on the host, unsandboxed, since install runs before
  * the sandbox spawns. A hostile folder's settings.json is otherwise
  * attacker-controlled JSON, so accepting arbitrary argv here (e.g.
@@ -620,7 +620,9 @@ function readPortList(
   }
   const isPort = (entry: JsonValue): entry is number =>
     typeof entry === 'number' && Number.isInteger(entry) && entry >= 0 && entry <= 65535;
-  const dropped = value.filter(entry => !isPort(entry));
+  const dropped = value
+    .filter(entry => !isPort(entry))
+    .map(entry => (typeof entry === 'object' && entry !== null ? JSON.stringify(entry) : String(entry)));
   if (dropped.length > 0) {
     warnings.push(`${path}: ${key} entries must be integers 0–65535 — ignored: ${dropped.join(', ')}`);
   }

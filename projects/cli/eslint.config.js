@@ -1,56 +1,40 @@
-import eslint from '@eslint/js';
 import { defineConfig } from 'eslint/config';
-import tseslint from 'typescript-eslint';
+import { typescriptConfig, testsConfig, jsonConfig } from '@coryrylan/tools/eslint';
 
 export default defineConfig([
   { ignores: ['dist/**', '.wireit/**', '*.config.js'] },
-  eslint.configs.recommended,
-  tseslint.configs.strict,
+  typescriptConfig,
+  testsConfig,
+  jsonConfig,
   {
     files: ['**/*.ts'],
     languageOptions: {
       parserOptions: {
-        projectService: true,
         tsconfigRootDir: import.meta.dirname
       }
     },
     rules: {
-      eqeqeq: 'error',
       complexity: ['error', { max: 10 }],
-      'no-shadow': 'error',
-      'prefer-const': 'error',
-      'no-param-reassign': 'error',
-      'max-depth': ['error', 3],
       'max-params': ['error', 4],
       'max-lines': ['error', 1000],
-      'max-lines-per-function': ['error', 50],
-      'max-nested-callbacks': ['error', 3],
-      'max-statements': ['error', 15],
-      'max-statements-per-line': ['error', { max: 1 }],
-      'no-implicit-coercion': 'error',
-      'no-unreachable': 'error',
-      'no-useless-return': 'error',
-      'no-useless-catch': 'error',
-      'no-restricted-imports': ['error', { patterns: ['**/dist/**', '**/node_modules/**'] }],
-      'id-length': ['error', { min: 2, exceptions: ['_'] }],
-      '@typescript-eslint/explicit-function-return-type': 'error',
-      '@typescript-eslint/no-non-null-assertion': 'error',
-      '@typescript-eslint/prefer-readonly': 'error',
-      '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/no-misused-promises': 'error',
-      '@typescript-eslint/only-throw-error': 'error',
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }]
+      // Sandbox rationale (seatbelt last-match-wins ordering, MISE_CACHE_DIR
+      // override, argv-only composition) is why-prose that no type or test can
+      // encode; a prose budget would delete the reasoning, not relocate it.
+      'tools/no-excessive-comments': 'off'
     }
   },
   {
-    files: ['src/**/*.test.ts', 'src/test-helpers.ts'],
+    files: ['**/*.test.ts'],
     rules: {
-      'max-lines-per-function': 'off',
-      'max-statements': 'off',
-      'max-params': 'off',
-      complexity: 'off',
       'id-length': 'off',
-      '@typescript-eslint/explicit-function-return-type': 'off'
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/await-thenable': 'off',
+      '@typescript-eslint/require-await': 'off',
+      '@typescript-eslint/no-confusing-void-expression': 'off'
     }
   },
   {

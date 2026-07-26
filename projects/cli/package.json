@@ -220,13 +220,16 @@
     }
   },
   "dependencies": {
-    "yargs": "18.0.0"
+    "yargs": "^18.0.0"
   },
   "devDependencies": {
+    "@coryrylan/tools": "1.1.0",
     "@eslint/js": "catalog:",
+    "@eslint/json": "1.2.0",
     "@types/bun": "catalog:",
     "@types/yargs": "17.0.35",
     "eslint": "catalog:",
+    "eslint-plugin-jsdoc": "63.2.0",
     "typescript": "catalog:",
     "typescript-eslint": "catalog:"
   }

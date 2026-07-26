@@ -50,7 +50,7 @@ describe('requireBin', () => {
   });
 
   it('throws a friendly error pointing at `cradle doctor`', () => {
-    expect(() => requireBin('pi', createWhichStub({}))).toThrow(/required executable "pi" not found/);
+    expect(() => requireBin('pi', createWhichStub({}))).toThrow(/Required executable "pi" not found/);
     expect(() => requireBin('pi', createWhichStub({}))).toThrow(/cradle doctor/);
   });
 });
