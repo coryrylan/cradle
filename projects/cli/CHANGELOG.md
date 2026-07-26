@@ -1,3 +1,13 @@
+## [1.2.0](https://github.com/coryrylan/cradle/compare/cradle-v1.1.0...cradle-v1.2.0) (2026-07-26)
+
+### Features
+
+* **cli:** enhance sandbox configuration with docker support ([542cd79](https://github.com/coryrylan/cradle/commit/542cd79445cfc275ca8fa49f9b8e046a4fb23c9e))
+
+### Bug Fixes
+
+* **cli:** rename start command to run and update related documentation ([7324f82](https://github.com/coryrylan/cradle/commit/7324f823ad821b25e7d8e3db07b6cb585acfdd4e))
+
 ## [1.1.0](https://github.com/coryrylan/cradle/compare/cradle-v1.0.1...cradle-v1.1.0) (2026-07-20)
 
 ### Features
