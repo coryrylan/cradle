@@ -1,3 +1,10 @@
+## [1.3.1](https://github.com/coryrylan/cradle/compare/cradle-v1.3.0...cradle-v1.3.1) (2026-08-30)
+
+### Bug Fixes
+
+* **clI:** update dependencies ([24e2afe](https://github.com/coryrylan/cradle/commit/24e2afe3827a4f2916015fd1676464cb66a2dcd5))
+* **cli:** update deps ([07e4065](https://github.com/coryrylan/cradle/commit/07e4065826a2193d5c08ff7295441f0b496f89fe))
+
 ## [1.3.0](https://github.com/coryrylan/cradle/compare/cradle-v1.2.0...cradle-v1.3.0) (2026-07-26)
 
 ### Features
