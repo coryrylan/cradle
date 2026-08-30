@@ -5,12 +5,6 @@
 @import '@nvidia-elements/styles/typography.css';
 @import '@nvidia-elements/styles/view-transitions.css';
 
-:root {
-  --nve-sys-layer-canvas-background: oklch(2% 0.01 270);
-  --nve-sys-layer-container-background: oklch(4% 0.01 270);
-  --nve-sys-interaction-background: oklch(14% 0.01 270);
-}
-
 main :is(h1) {
   padding-block: 0 12px;
 }

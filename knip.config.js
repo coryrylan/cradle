@@ -6,7 +6,11 @@ export default {
     '@semantic-release/release-notes-generator',
     '@semantic-release/github',
     'conventional-changelog-conventionalcommits',
-    '@commitlint/cli'
+    '@commitlint/cli',
+    '@nvidia-elements/code',
+    '@nvidia-elements/core',
+    '@nvidia-elements/styles',
+    '@nvidia-elements/themes'
   ],
   workspaces: {
     'projects/cli': {

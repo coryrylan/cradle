@@ -12,7 +12,7 @@ An agent runs sandboxed when its folder declares `sandbox/nono.json`, `sandbox/s
 
 ## Choosing a backend
 
-[nono](https://github.com/always-further/nono) wraps `pi` in the host's own OS sandbox (Seatbelt on macOS). `pi` runs as your own user against your own filesystem, contained by policy — high host fidelity: your toolchain, your paths, and your loopback all work as-is. The Seatbelt escape hatch below exists because that policy engine has edge cases some tools need widened.
+[nono](https://github.com/nolabs-ai/nono) wraps `pi` in the host's own OS sandbox (Seatbelt on macOS). `pi` runs as your own user against your own filesystem, contained by policy — high host fidelity: your toolchain, your paths, and your loopback all work as-is. The Seatbelt escape hatch below exists because that policy engine has edge cases some tools need widened.
 
 [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (`sbx`) runs `pi` inside a microVM instead — a hard boundary, not a policy wrapper. The guest is a disposable Linux VM, so mac-only host integrations like `say` and agent-browser's Unix-socket daemon connection are simply inert inside it: `pi` warns and continues rather than failing the turn.
 
@@ -20,7 +20,7 @@ Backend precedence: `--no-sandbox` (off, unconditionally) > `--sandbox-backend <
 
 ## sandbox/nono.json
 
-Declaring `sandbox/nono.json` runs the agent inside the [nono](https://github.com/always-further/nono) filesystem sandbox: read-write on your current working directory, read-only on the agent folder. The file widens or tightens the sandbox posture declaratively:
+Declaring `sandbox/nono.json` runs the agent inside the [nono](https://github.com/nolabs-ai/nono) filesystem sandbox: read-write on your current working directory, read-only on the agent folder. The file widens or tightens the sandbox posture declaratively:
 
 ```json
 {

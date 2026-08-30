@@ -138,7 +138,7 @@ Load order is load-bearing: cradle's generated providers extension loads first (
 
 ### `sandbox/nono.json`
 
-An agent runs inside the [nono](https://github.com/always-further/nono) sandbox when it declares `sandbox/nono.json`, read-write on your cwd and read on the agent folder. Without that file — or `sandbox/sbx.json` (the second backend, see [below](#sandboxsbxjson)) — cradle runs bare `pi` and prints an OS-isolation warning. The file widens or tightens the sandbox posture declaratively:
+An agent runs inside the [nono](https://github.com/nolabs-ai/nono) sandbox when it declares `sandbox/nono.json`, read-write on your cwd and read on the agent folder. Without that file — or `sandbox/sbx.json` (the second backend, see [below](#sandboxsbxjson)) — cradle runs bare `pi` and prints an OS-isolation warning. The file widens or tightens the sandbox posture declaratively:
 
 ```json
 {
