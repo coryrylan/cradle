@@ -2,7 +2,7 @@
 
 ![CI Build](https://github.com/coryrylan/cradle/actions/workflows/pull-request.yml/badge.svg)
 
-**A runtime for portable agents defined as folders.** An agent is a directory: a `SYSTEM.md` or `APPEND_SYSTEM.md` plus optional model config, skills, extensions, and sandbox posture. `cradle run <dir>` reads the folder and launches the [pi](https://github.com/earendil-works/pi-mono) coding agent configured from it — sandboxed when the folder declares a posture, with a choice of backend: [nono](https://github.com/always-further/nono) (host OS policy) or [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (`sbx`, a microVM). Think of cradle as a pi agent switcher: one pi install, many agents, each described entirely by its own directory.
+**A runtime for portable agents defined as folders.** An agent is a directory: a `SYSTEM.md` or `APPEND_SYSTEM.md` plus optional model config, skills, extensions, and sandbox posture. `cradle run <dir>` reads the folder and launches the [pi](https://github.com/earendil-works/pi-mono) coding agent configured from it — sandboxed when the folder declares a posture, with a choice of backend: [nono](https://github.com/nolabs-ai/nono) (host OS policy) or [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (`sbx`, a microVM). Think of cradle as a pi agent switcher: one pi install, many agents, each described entirely by its own directory.
 
 The folder is static, portable, and committable; runtime state (generated extensions, session history, the generated sandbox profile) lives outside it under `~/.cradle/`. An agent folder is code — extensions run with the pi process's permissions — so treat a third-party folder like any repo you'd run.
 

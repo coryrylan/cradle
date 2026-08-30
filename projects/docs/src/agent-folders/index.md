@@ -108,7 +108,7 @@ Load order is load-bearing: cradle's generated providers extension loads first (
 
 ## sandbox/nono.json
 
-Sandbox posture — filesystem grants, network policy, and the sandbox opt-out — for the [nono](https://github.com/always-further/nono) host-OS-policy backend. See [Sandbox](../sandbox/) for the full reference.
+Sandbox posture — filesystem grants, network policy, and the sandbox opt-out — for the [nono](https://github.com/nolabs-ai/nono) host-OS-policy backend. See [Sandbox](../sandbox/) for the full reference.
 
 ## sandbox/sbx.json
 
