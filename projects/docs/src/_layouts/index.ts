@@ -11,6 +11,7 @@ import '@nvidia-elements/code/codeblock/languages/bash.js';
 import '@nvidia-elements/code/codeblock/languages/json.js';
 import '@nvidia-elements/code/codeblock/languages/typescript.js';
 import '@nvidia-elements/code/codeblock/languages/markdown.js';
+import '@nvidia-elements/code/codeblock/languages/yaml.js';
 import '@nvidia-elements/code/codeblock/define.js';
 
 const isLightMode = !window.matchMedia('(prefers-color-scheme: dark)').matches;

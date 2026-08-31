@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach } from 'bun:test';
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { killOn, runCapture, runForeground, runInstall } from './proc.js';
+import { killOn, runCapture, runCaptureAll, runForeground, runInstall } from './proc.js';
 
 describe('killOn', () => {
   it('returns a handler that forwards the signal to the process', () => {
@@ -31,6 +31,17 @@ describe('runForeground', () => {
     await runForeground(['true']);
     await runForeground(['true']);
     expect(process.listenerCount('SIGINT') + process.listenerCount('SIGTERM')).toBe(baseline);
+  });
+
+  it('spawns in the given cwd when provided', async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), 'cradle-runforeground-cwd-')));
+    try {
+      const outFile = join(dir, 'out.txt');
+      await runForeground(['sh', '-c', `pwd > ${outFile}`], {}, dir);
+      expect((await readFile(outFile, 'utf8')).trim()).toBe(dir);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('overrides the inherited env with the given entries', async () => {
@@ -63,6 +74,26 @@ describe('runCapture', () => {
   it('resolves with a zero exit code and empty stderr on success', async () => {
     const result = await runCapture(['true']);
     expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe('');
+  });
+});
+
+describe('runCaptureAll', () => {
+  it('throws when given no command', async () => {
+    await expect(runCaptureAll([])).rejects.toThrow(/at least one argument/);
+  });
+
+  it('captures both stdout and stderr without throwing on a non-zero exit', async () => {
+    const result = await runCaptureAll(['sh', '-c', 'echo out; echo err >&2; exit 3']);
+    expect(result.exitCode).toBe(3);
+    expect(result.stdout).toContain('out');
+    expect(result.stderr).toContain('err');
+  });
+
+  it('resolves with a zero exit code and empty streams on success', async () => {
+    const result = await runCaptureAll(['true']);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe('');
     expect(result.stderr).toBe('');
   });
 });

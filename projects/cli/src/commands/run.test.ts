@@ -855,3 +855,86 @@ describe('materializeRun with the sbx backend', () => {
     await expect(materializeRun(plan, {})).rejects.toThrow('command runner');
   });
 });
+
+describe('planRun --schedule', () => {
+  let scheduleWorkDir: string;
+  const unsandboxedDeps = { ...deps, which: createWhichStub({ pi: '/shims/pi' }) };
+
+  beforeEach(async () => {
+    scheduleWorkDir = join(root, 'schedule-work');
+    await mkdir(scheduleWorkDir, { recursive: true });
+    await addFile(
+      'schedule/nightly.md',
+      [
+        '---',
+        'name: Nightly report',
+        `cwd: ${scheduleWorkDir}`,
+        "cron: '0 9 * * *'",
+        '---',
+        '',
+        'Summarize yesterday.',
+        ''
+      ].join('\n')
+    );
+  });
+
+  it('should resolve the schedule cwd and append the headless invocation after user passthrough', async () => {
+    const plan = await planRun(
+      { dir: agentDir, schedule: 'nightly', noSandbox: true, passthrough: ['--foo'] },
+      unsandboxedDeps
+    );
+    expect(plan.cwd).toBe(scheduleWorkDir);
+    const argv = composeArgv(plan.launch);
+    const tailIndex = argv.indexOf('--foo');
+    expect(argv.slice(tailIndex)).toEqual([
+      '--foo',
+      '--print',
+      '--name',
+      'Nightly report',
+      '--no-approve',
+      '--',
+      'Summarize yesterday.'
+    ]);
+  });
+
+  it('should default cwd to deps.cwd when no --schedule is passed', async () => {
+    const plan = await planRun({ dir: agentDir, noSandbox: true }, unsandboxedDeps);
+    expect(plan.cwd).toBe('/work');
+  });
+
+  it('should throw naming the folder when schedule/ is absent', async () => {
+    await rm(join(agentDir, 'schedule'), { recursive: true, force: true });
+    await expect(planRun({ dir: agentDir, schedule: 'nightly', noSandbox: true }, unsandboxedDeps)).rejects.toThrow(
+      `No schedule/ directory in ${agentDir}`
+    );
+  });
+
+  it('should throw naming the requested slug and listing the available ones when unknown', async () => {
+    await expect(planRun({ dir: agentDir, schedule: 'nope', noSandbox: true }, unsandboxedDeps)).rejects.toThrow(
+      'Unknown schedule "nope" (available: nightly)'
+    );
+  });
+
+  it('should warn (not throw) when the schedule cwd does not exist on disk', async () => {
+    await addFile(
+      'schedule/broken.md',
+      [
+        '---',
+        'name: Broken',
+        'cwd: /nonexistent/path/for/cradle-schedule-tests',
+        "cron: '0 9 * * *'",
+        '---',
+        '',
+        'Do the thing.',
+        ''
+      ].join('\n')
+    );
+    const plan = await planRun({ dir: agentDir, schedule: 'broken', noSandbox: true }, unsandboxedDeps);
+    expect(plan.warnings.join('\n')).toContain('cwd does not exist: /nonexistent/path/for/cradle-schedule-tests');
+  });
+
+  it('should not warn when the schedule cwd exists', async () => {
+    const plan = await planRun({ dir: agentDir, schedule: 'nightly', noSandbox: true }, unsandboxedDeps);
+    expect(plan.warnings.join('\n')).not.toContain('cwd does not exist');
+  });
+});

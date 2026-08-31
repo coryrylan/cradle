@@ -42,6 +42,7 @@ my-agent/
   skills/            optional   markdown playbooks, loaded when relevant
   extensions/        optional   pi extensions: custom tools, commands, hooks
   sandbox/           optional   sandbox posture (nono.json, sbx.json)
+  schedule/          optional   cron-driven scheduled runs
 ```
 
 `*` At least one of `SYSTEM.md` (replaces pi's default prompt) / `APPEND_SYSTEM.md` (appends to it) is required; a folder may ship both. Every supported file uses a pi-native or cross-tool-standard name, mirroring pi's own `~/.pi/agent/` layout — anything written for a personal pi config drops in unchanged. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full folder-format spec and [`examples/`](./examples) for runnable agents:
@@ -66,7 +67,7 @@ bun run format:fix   # prettier write
 bun run lint:knip    # knip across all workspaces (unused files / deps / exports)
 ```
 
-Package-scoped scripts (`build`, `test`, `lint`, …) run inside the package — e.g. `cd projects/cli && bun run build`. See each package's `README.md` and the root [`CLAUDE.md`](./CLAUDE.md) for details.
+Package-scoped scripts (`build`, `test`, `lint`, …) run inside the package — e.g. `cd projects/cli && bun run build`. See each package's `README.md` and the root [`AGENTS.md`](./AGENTS.md) for details.
 
 ## License
 

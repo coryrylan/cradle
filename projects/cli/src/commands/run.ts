@@ -18,6 +18,7 @@ import { emitProvidersExtension } from '../agent/extensions/providers.js';
 import { loadAgentFolder, type AgentFolder, type AgentNetwork, type SandboxBackend } from '../agent/folder.js';
 import { composeArgv, type LaunchSpec } from '../agent/launch.js';
 import { emitPackagesManifest, resolvePackageEntries, type NpmPackageSpec } from '../agent/packages.js';
+import { loadSchedules, missingScheduleDirError, type Schedule } from '../agent/schedules.js';
 import { stateDirFor, statePaths } from '../agent/state.js';
 import { resolveLinkedGitDir } from '../nono/linked-git-dir.js';
 import { AGENT_PROFILE_FILE, buildProfileJson, findDegenerateSandboxCwd } from '../nono/profiles.js';
@@ -50,6 +51,18 @@ export interface RunFlags {
   readonly passthrough?: readonly string[];
   /** `--verbose` → show nono's full sandbox capabilities banner instead of the one-line status. */
   readonly verbose?: boolean;
+  /**
+   * A `schedule/<task>.md` slug to run headless instead of starting an
+   * interactive session. The named schedule's `cwd` replaces the run's
+   * effective working directory (see `RunPlan.cwd`), and its body is appended
+   * to the launch passthrough as `--print --name <name> --no-approve --
+   * <prompt>`, after any user `--` passthrough so it always terminates the
+   * argv. Set only by `cradle schedule run` — and therefore by the OS timers,
+   * whose composed argv is exactly that command (see `schedule/launchd.ts`
+   * and `schedule/systemd.ts`). There is deliberately no `--schedule` flag on
+   * `cradle run`: two spellings of one action is one too many.
+   */
+  readonly schedule?: string;
 }
 
 interface RunDeps {
@@ -121,6 +134,13 @@ export interface RunPlan {
   readonly packages: PackagesPlan | null;
   /** The single argv source: `composeArgv(plan.launch)` — package-entry-free until `materializeRun` recomposes it with resolved package entries. */
   readonly launch: LaunchSpec;
+  /**
+   * The effective working directory: `deps.cwd`, or `flags.schedule`'s
+   * `Schedule.cwd` when a schedule is running. Callers spawn here — `cli.ts`
+   * passes it to `runForeground` — since a scheduled run's launchd/systemd
+   * invocation carries no shell `cd` of its own.
+   */
+  readonly cwd: string;
   readonly dryRun: boolean;
 }
 
@@ -134,9 +154,10 @@ export interface RunPlan {
  */
 export async function planRun(flags: RunFlags, deps: RunDeps = {}): Promise<RunPlan> {
   const home = deps.home ?? homedir();
-  const cwd = deps.cwd ?? process.cwd();
-  const { dir, warnings: refWarnings } = await resolveAgentRef(flags.dir, { home, cwd });
+  const baseCwd = deps.cwd ?? process.cwd();
+  const { dir, warnings: refWarnings } = await resolveAgentRef(flags.dir, { home, cwd: baseCwd });
   const folder = await loadAgentFolder(dir);
+  const scheduled = await resolveScheduledRun(flags, folder, home, baseCwd);
   const stateDir = stateDirFor(folder.dir, home);
   const { extensionsDir, sessionsDir, miseCacheDir } = statePaths(stateDir);
   const posture = resolvePosture(flags, folder);
@@ -145,6 +166,7 @@ export async function planRun(flags: RunFlags, deps: RunDeps = {}): Promise<RunP
   const launch = buildLaunch({
     folder,
     flags,
+    passthrough: scheduled.passthrough,
     backend: posture.backend,
     bins,
     stateDir,
@@ -154,7 +176,7 @@ export async function planRun(flags: RunFlags, deps: RunDeps = {}): Promise<RunP
   });
   const isolation = await buildIsolation(posture, folder, {
     home,
-    cwd,
+    cwd: scheduled.cwd,
     stateDir,
     profilePath: launch.profilePath,
     sbxBin: bins.sbxBin,
@@ -166,18 +188,83 @@ export async function planRun(flags: RunFlags, deps: RunDeps = {}): Promise<RunP
     files: emitExtensionFiles(folder, posture.backend),
     extensionsDir,
     sessionsDir,
-    warnings: [...refWarnings, ...posture.warnings, ...isolation.warnings],
+    warnings: [...refWarnings, ...scheduled.warnings, ...posture.warnings, ...isolation.warnings],
     profile: isolation.profile,
     sbx: isolation.sbx,
     packages,
     launch,
+    cwd: scheduled.cwd,
     dryRun
   };
+}
+
+interface ScheduledRunPlan {
+  /** `Schedule.cwd` when `--schedule` resolved one, `baseCwd` otherwise — the run's effective working directory. */
+  readonly cwd: string;
+  /** `flags.passthrough` as-is, or with the schedule's headless invocation appended. */
+  readonly passthrough: readonly string[];
+  readonly warnings: readonly string[];
+}
+
+/**
+ * Resolve `flags.schedule` (`--schedule <task>`) against the folder's
+ * `schedule/` dir, folding the result onto `baseCwd`/`flags.passthrough` so
+ * `planRun` never branches on whether a schedule was requested. Requires
+ * `folder.scheduleDir` and a matching slug — both hard errors, since a
+ * scheduled run that silently falls back to an interactive session would
+ * hang a headless invocation forever.
+ */
+async function resolveScheduledRun(
+  flags: RunFlags,
+  folder: AgentFolder,
+  home: string,
+  baseCwd: string
+): Promise<ScheduledRunPlan> {
+  const unscheduled: ScheduledRunPlan = { cwd: baseCwd, passthrough: flags.passthrough ?? [], warnings: [] };
+  if (flags.schedule === undefined) return unscheduled;
+  if (folder.scheduleDir === null) {
+    throw await missingScheduleDirError(folder.dir);
+  }
+  const { schedules, warnings } = await loadSchedules(folder.scheduleDir, home);
+  const schedule = schedules.find(candidate => candidate.slug === flags.schedule);
+  if (schedule === undefined) {
+    throw new Error(unknownScheduleMessage(flags.schedule, schedules));
+  }
+  return {
+    cwd: schedule.cwd,
+    passthrough: [
+      ...unscheduled.passthrough,
+      '--print',
+      '--name',
+      schedule.name,
+      '--no-approve',
+      '--',
+      schedule.prompt
+    ],
+    warnings: [...warnings, ...(await missingScheduleCwdWarning(schedule))]
+  };
+}
+
+/** A schedule's cwd is read lazily on every run — worth catching now, not at 9am when the timer fires into a missing directory. */
+async function missingScheduleCwdWarning(schedule: Schedule): Promise<readonly string[]> {
+  if (await exists(schedule.cwd)) return [];
+  return [`schedule "${schedule.slug}" cwd does not exist: ${schedule.cwd}`];
+}
+
+/** Mirrors `aliases.ts`'s `bothMissedMessage` style — names the requested slug and lists what's available. */
+function unknownScheduleMessage(slug: string, schedules: readonly Schedule[]): string {
+  const known =
+    schedules.length > 0
+      ? ` (available: ${schedules.map(schedule => schedule.slug).join(', ')})`
+      : ' (schedule/ is empty)';
+  return `Unknown schedule "${slug}"${known}`;
 }
 
 interface LaunchContext {
   readonly folder: AgentFolder;
   readonly flags: RunFlags;
+  /** The resolved passthrough — `flags.passthrough` plain, or with a `--schedule` invocation appended (see `resolveScheduledRun`). */
+  readonly passthrough: readonly string[];
   readonly backend: SandboxBackend | null;
   readonly bins: ResolvedBins;
   readonly stateDir: string;
@@ -188,7 +275,7 @@ interface LaunchContext {
 
 /** Resolve the generated-extension paths and profile path into the `LaunchSpec` `composeArgv` consumes. */
 function buildLaunch(ctx: LaunchContext): LaunchSpec {
-  const { folder, flags, backend, bins, stateDir, extensionsDir, sessionsDir, miseCacheDir } = ctx;
+  const { folder, flags, passthrough, backend, bins, stateDir, extensionsDir, sessionsDir, miseCacheDir } = ctx;
   return {
     folder,
     stateDir,
@@ -196,7 +283,7 @@ function buildLaunch(ctx: LaunchContext): LaunchSpec {
     sessionsDir,
     miseCacheDir,
     backend,
-    passthrough: flags.passthrough ?? [],
+    passthrough,
     nonoBin: bins.nonoBin,
     // The guest resolves `pi` on its own PATH (provisioning installed it
     // there); the host's resolved path is meaningless inside the microVM.

@@ -21,8 +21,15 @@ export function killOn(proc: Killable, signal: ForwardableSignal): () => void {
  *
  * `env` entries override the inherited `process.env` (used for the
  * sandboxed-run `MISE_CACHE_DIR`, see `agent/launch.ts`'s `composeEnv`).
+ * `cwd`, when given, is `RunPlan.cwd` — the effective working directory,
+ * which differs from `process.cwd()` only for a `--schedule` run (see
+ * `commands/run.ts`'s `resolveScheduledRun`).
  */
-export async function runForeground(argv: readonly string[], env: Record<string, string> = {}): Promise<number> {
+export async function runForeground(
+  argv: readonly string[],
+  env: Record<string, string> = {},
+  cwd?: string
+): Promise<number> {
   const [cmd, ...rest] = argv;
   if (!cmd) {
     throw new Error('Command requires at least one argument');
@@ -32,7 +39,8 @@ export async function runForeground(argv: readonly string[], env: Record<string,
     stdin: 'inherit',
     stdout: 'inherit',
     stderr: 'inherit',
-    env: { ...process.env, ...env }
+    env: { ...process.env, ...env },
+    ...(cwd !== undefined ? { cwd } : {})
   });
 
   // Forward interrupts to the child while it runs, then detach — leaving the
@@ -73,6 +81,37 @@ export async function runCapture(argv: readonly string[]): Promise<{ exitCode: n
 
   const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
   return { exitCode, stderr };
+}
+
+/**
+ * Run a command capturing BOTH streams — `commands/schedule.ts`'s
+ * launchctl/systemctl/loginctl steps, which (unlike `runCapture`'s
+ * sbx setup, stderr-only) need stdout too: the linger check
+ * (`loginctl show-user --property=Linger`) reports its answer there. Never
+ * throws on a non-zero exit; the caller decides which failures matter
+ * (`TimerStep.ignoreFailure`).
+ */
+export async function runCaptureAll(
+  argv: readonly string[]
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const [cmd, ...rest] = argv;
+  if (!cmd) {
+    throw new Error('Command requires at least one argument');
+  }
+
+  const proc = Bun.spawn([cmd, ...rest], {
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: process.env
+  });
+
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited
+  ]);
+  return { exitCode, stdout, stderr };
 }
 
 /** Run a package install (e.g. `npm install`) in `cwd`, inheriting output; throws on non-zero exit. */

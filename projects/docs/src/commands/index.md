@@ -4,7 +4,7 @@
 
 # Commands
 
-`cradle` has two commands: `start`, which launches an agent, and `doctor`, which checks your setup.
+`cradle` has three commands: `run`, which launches an agent, `schedule`, which manages cron-driven runs, and `doctor`, which checks your setup.
 
 ## Usage
 
@@ -18,6 +18,12 @@ cradle run . --allow-host api.example.com  # restrict network to these hosts (re
 cradle run . --sandbox-backend sbx  # run under the sbx Docker Sandboxes microVM instead of nono
 cradle run . --no-sandbox           # run pi directly (debug)
 cradle run . --dry-run -- --resume  # print the write plan + command; forward `--resume` to pi
+
+cradle schedule list ./my-agent              # tasks, cron, next fire, installed?
+cradle schedule install ./my-agent           # write + load a native OS timer per task
+cradle schedule install ./my-agent --dry-run # print what would be written, touch nothing
+cradle schedule run ./my-agent daily-report  # fire one task now, in the foreground
+cradle schedule remove ./my-agent [task]     # unload + delete (every task, or one)
 ```
 
 ## How `cradle run` works
@@ -47,4 +53,4 @@ See [Sandbox](../sandbox/) for how `--offline`, `--allow-host`, `--no-sandbox`, 
 
 ## Doctor
 
-`cradle doctor` checks `pi` (required), and `nono`/`sbx`/`mise` (recommended — each on your `PATH`, with version). `cradle run` reads the agent folder and launches `pi` in your current working directory — sandboxed inside `nono` or `sbx` when the folder declares `sandbox/nono.json`/`sandbox/sbx.json`, bare (with a warning) otherwise.
+`cradle doctor` checks `pi` (required), and `nono`/`sbx`/`mise` plus your platform's timer backend — `launchctl` on macOS, `systemctl` on Linux — (recommended — each on your `PATH`, with version). `cradle run` reads the agent folder and launches `pi` in your current working directory — sandboxed inside `nono` or `sbx` when the folder declares `sandbox/nono.json`/`sandbox/sbx.json`, bare (with a warning) otherwise.

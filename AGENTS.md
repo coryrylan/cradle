@@ -1,12 +1,12 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to agents when working with code in this repository.
 
 ## Project Overview
 
 Bun workspaces monorepo. Packages live under `projects/`.
 
-- `projects/cli/` — `@coryrylan/cradle` CLI app (bin: `cradle`). See [`projects/cli/CLAUDE.md`](./projects/cli/CLAUDE.md) for package-specific guidance.
+- `projects/cli/` — `@coryrylan/cradle` CLI app (bin: `cradle`). See [`projects/cli/AGENTS.md`](./projects/cli/AGENTS.md) for package-specific guidance.
 - `projects/docs/` — `@coryrylan/cradle-docs`, the Eleventy documentation site for `cradle`, built with the NVIDIA Elements (`nve-*`) UI design system. Build/lint via `bun run ci` in `projects/docs/`. Not released to npm, but its build depends on `projects/cli`'s build and statically deploys the CLI `install.sh` + platform binaries (`copy-cli-assets.js`) alongside the site — the documented primary install path.
 
 ## Tooling split

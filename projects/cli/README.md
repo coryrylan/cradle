@@ -73,9 +73,31 @@ cradle run . --allow-host api.example.com  # restrict network to these hosts (re
 cradle run . --sandbox-backend sbx  # run under the sbx Docker Sandboxes microVM instead of nono
 cradle run . --no-sandbox           # run pi directly (debug)
 cradle run . --dry-run -- --resume  # print the write plan + command; forward `--resume` to pi
+
+cradle schedule list ./my-agent            # scheduled tasks, cron, next fire
+cradle schedule list my-agent              # a name from ~/.cradle/settings.json works here too
+cradle schedule install ./my-agent         # write + load a native OS timer per task
+cradle schedule run ./my-agent daily-report  # fire one task now, in the foreground
+cradle schedule remove ./my-agent          # unload + delete
 ```
 
 The agent runs in _your_ working directory; the agent folder is a parameter (default `.`). Everything after `--` is forwarded verbatim to pi. `--dry-run` prints the generated-extension write plan and the composed command without spawning (and without requiring the bins to be installed). Per-agent state (generated extensions + session history) lives under `~/.cradle/agents/<name>-<hash>/`.
+
+### Scheduled runs (`schedule/`)
+
+An agent folder can carry a `schedule/` directory; each `schedule/<task>.md` is one cron-driven run — YAML frontmatter (`cron`, `cwd`, optional `name`/`description`) plus a markdown body that becomes the prompt.
+
+```yaml
+---
+name: Daily standup report
+cron: '0 9 * * 1-5'
+cwd: ~/dev/my-project
+---
+```
+
+`cradle schedule install` writes one native OS timer per task — a launchd LaunchAgent on macOS, a systemd user timer on Linux — each invoking `cradle schedule run <folder> <task>`. Both beat cron because they run a missed calendar job after the machine wakes. Task output lands in `~/.cradle/agents/<id>/schedule/<task>.log`.
+
+A scheduled run is an ordinary `cradle run` with the task's `cwd` and prompt, so it adds no new sandbox policy: `cwd` is read+write exactly as it is interactively, and reaching outside it still needs a `sandbox/nono.json` grant. Runs pass pi's `--print` and `--no-approve` so an unattended job never blocks on a trust prompt. Cron expressions constraining both day-of-month and day-of-week are rejected — cron ORs those fields while launchd and systemd both AND them. See [ARCHITECTURE.md](../../ARCHITECTURE.md#schedules) for the full format.
 
 ### Global agent aliases (`~/.cradle/settings.json`)
 

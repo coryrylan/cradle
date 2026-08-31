@@ -8,10 +8,17 @@ import pkg from '../package.json' with { type: 'json' };
 import { composeArgv, composeEnv } from './agent/launch.js';
 import { doctorExitCode, formatDoctorReport, runDoctor } from './commands/doctor.js';
 import { materializeRun, planRun, type RunFlags, type RunPlan } from './commands/run.js';
+import {
+  formatScheduleList,
+  materializeSchedule,
+  planSchedule,
+  type ScheduleFlags,
+  type SchedulePlan
+} from './commands/schedule.js';
 import { composeSbxExecArgv } from './sbx/compose.js';
 import { quoteCommandPart } from './setup/utils.js';
 import { styleWarning } from './util/style.js';
-import { runCapture, runForeground, runInstall } from './util/proc.js';
+import { runCapture, runCaptureAll, runForeground, runInstall } from './util/proc.js';
 
 const cli = yargs(process.argv.slice(2))
   .scriptName('cradle')
@@ -91,6 +98,53 @@ cli.command(
 );
 
 cli.command(
+  'schedule <action> [dir] [task]',
+  'manage schedule/*.md tasks as launchd (macOS) / systemd --user (Linux) timers',
+  builder =>
+    builder
+      .positional('action', {
+        type: 'string',
+        choices: ['list', 'install', 'remove', 'run'] as const,
+        demandOption: true,
+        describe: 'list every schedule, install/remove their timers, or run one now'
+      })
+      .positional('dir', {
+        type: 'string',
+        default: '.',
+        describe: 'agent folder, or a name from ~/.cradle/settings.json (default: .)'
+      })
+      .positional('task', {
+        type: 'string',
+        describe:
+          'schedule slug — required for `run`; an optional filter for `install`/`remove` (default: every schedule)'
+      })
+      .option('dry-run', {
+        type: 'boolean',
+        default: false,
+        description: 'install/remove: print what would change, touch nothing'
+      }),
+  async argv => {
+    // `run` is the task itself, not timer management: it goes through the same
+    // pipeline an interactive `cradle run` uses, which is exactly what an
+    // installed timer invokes. Everything else manages the timers.
+    if (argv.action === 'run') {
+      if (argv.task === undefined) {
+        reportError(new Error('A task slug is required: cradle schedule run <dir> <task>'));
+        return;
+      }
+      await executeRun({ dir: argv.dir, schedule: argv.task });
+      return;
+    }
+    await executeSchedule({
+      dir: argv.dir,
+      action: argv.action,
+      ...(argv.task !== undefined ? { slug: argv.task } : {}),
+      ...(argv.dryRun ? { dryRun: true } : {})
+    });
+  }
+);
+
+cli.command(
   'doctor',
   'check pi / nono / mise on PATH',
   () => {},
@@ -119,9 +173,47 @@ async function executeRun(flags: RunFlags): Promise<void> {
     printWarnings(result.warnings);
     if (plan.profile !== null && !flags.verbose) console.log('🔒 Sandbox Active');
     if (plan.sbx !== null && !flags.verbose) console.log('🔒 Sandbox Active (sbx)');
-    process.exit(await runForeground(result.argv, composeEnv(plan.launch)));
+    process.exit(await runForeground(result.argv, composeEnv(plan.launch), plan.cwd));
   } catch (err) {
     reportError(err);
+  }
+}
+
+// Same one-line-error contract as `executeRun` — a rejection escaping the
+// yargs handler would print the full usage dump plus a stack trace instead.
+async function executeSchedule(flags: ScheduleFlags): Promise<void> {
+  try {
+    const plan = await planSchedule(flags);
+    printWarnings(plan.warnings);
+    if (plan.action === 'list') {
+      console.log(formatScheduleList(plan.rows));
+      return;
+    }
+    if (plan.dryRun) {
+      printScheduleDryRun(plan);
+      return;
+    }
+    const result = await materializeSchedule(plan, { run: runCaptureAll });
+    printWarnings(result.warnings);
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+// The dry-run preview for a mutating action: exactly what it would run and
+// touch, per selected schedule, without doing any of it. `remove` needs this
+// as much as `install` does — more, since its effects are unrecoverable.
+function printScheduleDryRun(plan: SchedulePlan): void {
+  for (const target of plan.targets) {
+    if (plan.action === 'install') {
+      for (const file of target.timerPlan.files) console.log(`write: ${file.path}`);
+      for (const step of target.timerPlan.installSteps)
+        console.log(`install: ${step.argv.map(quoteCommandPart).join(' ')}`);
+      continue;
+    }
+    for (const step of target.timerPlan.removeSteps)
+      console.log(`remove: ${step.argv.map(quoteCommandPart).join(' ')}`);
+    for (const file of target.timerPlan.files) console.log(`delete: ${file.path}`);
   }
 }
 
