@@ -21,7 +21,7 @@ import {
   type JsonValue
 } from '../setup/utils.js';
 
-export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface AgentSettings {
   readonly defaultProvider?: string;
@@ -114,6 +114,8 @@ export interface AgentFolder {
   /** Serialized `providers` object from models.json, `null` when absent. */
   readonly providersJson: string | null;
   readonly skillsDir: string | null;
+  /** `schedule/` dir, `null` when absent. Parsing is lazy — see `./schedules.js`'s `loadSchedules`. */
+  readonly scheduleDir: string | null;
   /** pi-native extensions (top-level `extensions/*.ts` plus each subdir's `index.ts`), absolute paths. */
   readonly extensionFiles: readonly string[];
   /** `sandbox/nono.json`'s declared posture — the Seatbelt/bubblewrap backend. */
@@ -129,14 +131,15 @@ export interface AgentFolder {
   readonly warnings: readonly string[];
 }
 
-const THINKING_LEVELS: readonly ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
-const RESERVED_DIRS = new Set(['schedules', 'subagents', 'channels', 'connections']);
+const THINKING_LEVELS: readonly ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+const RESERVED_DIRS = new Set(['subagents', 'channels', 'connections']);
 const KNOWN_ENTRIES = new Set([
   'SYSTEM.md',
   'APPEND_SYSTEM.md',
   'settings.json',
   'models.json',
   'skills',
+  'schedule',
   'extensions',
   'sandbox'
 ]);
@@ -171,6 +174,7 @@ export async function loadAgentFolder(dir: string): Promise<AgentFolder> {
     settings: await loadSettings(abs, byName.has('settings.json'), warnings),
     providersJson: await loadProviders(abs, byName.has('models.json'), warnings),
     skillsDir: await resolveSkillsDir(abs, byName.get('skills'), warnings),
+    scheduleDir: await resolveScheduleDir(abs, byName.get('schedule'), warnings),
     extensionFiles: await loadExtensions(abs, byName.get('extensions'), warnings),
     sandbox: sandboxes.nono,
     sbx: sandboxes.sbx,
@@ -217,8 +221,18 @@ function warnUnknownEntries(entries: readonly Dirent[], warnings: string[]): voi
     warnings.push(`reserved for a future cradle release, ignored: ${reserved.join(', ')}`);
   }
   if (unknown.length > 0) {
-    warnings.push(`not part of the agent folder format, ignored: ${unknown.join(', ')}`);
+    warnings.push(`not part of the agent folder format, ignored: ${unknown.join(', ')}${pluralHint(unknown)}`);
   }
+}
+
+/**
+ * `schedules/` is the intuitive guess for a directory holding many schedules,
+ * so name the singular rather than leaving the author to spot it in the spec —
+ * the same targeted-hint precedent as the `AGENTS.md` rename and the removed
+ * `net` key.
+ */
+function pluralHint(unknown: readonly string[]): string {
+  return unknown.includes('schedules') ? ' — did you mean schedule/ (singular)?' : '';
 }
 
 /**
@@ -350,6 +364,15 @@ async function resolveSkillsDir(abs: string, entry: Dirent | undefined, warnings
     return null;
   }
   return join(abs, 'skills');
+}
+
+async function resolveScheduleDir(abs: string, entry: Dirent | undefined, warnings: string[]): Promise<string | null> {
+  if (!entry) return null;
+  if (!(await isDirectoryEntry(abs, entry))) {
+    warnings.push('schedule must be a directory — ignored');
+    return null;
+  }
+  return join(abs, 'schedule');
 }
 
 /** Mirror pi's own extension discovery shapes: top-level `extensions/*.ts` plus each subdir's `index.ts`. */

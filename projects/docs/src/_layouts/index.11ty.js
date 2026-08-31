@@ -6,7 +6,8 @@ const NAV_ITEMS = [
   { label: 'Agent Folders', href: 'agent-folders/', url: '/agent-folders/' },
   { label: 'Commands', href: 'commands/', url: '/commands/' },
   { label: 'Aliases', href: 'aliases/', url: '/aliases/' },
-  { label: 'Sandbox', href: 'sandbox/', url: '/sandbox/' }
+  { label: 'Sandbox', href: 'sandbox/', url: '/sandbox/' },
+  { label: 'Schedule', href: 'schedule/', url: '/schedule/' }
 ];
 
 export function render(data) {

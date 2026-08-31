@@ -11,6 +11,7 @@ function createFolder(overrides: Partial<AgentFolder> = {}): AgentFolder {
     settings: {},
     providersJson: null,
     skillsDir: null,
+    scheduleDir: null,
     extensionFiles: [],
     sandbox: {
       posture: 'enabled',

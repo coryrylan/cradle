@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { loadAgentFolder, type AgentSandbox } from './folder.js';
+import { loadAgentFolder, type AgentSandbox, type ThinkingLevel } from './folder.js';
 
 const EMPTY_SANDBOX: AgentSandbox = {
   posture: 'unconfigured',
@@ -251,6 +251,17 @@ describe('loadAgentFolder', () => {
       expect(warningsText(folder)).toContain('defaultProvider must be a string');
     });
 
+    it("should accept every thinking level pi's --thinking accepts", async () => {
+      await appendSystemMd();
+      const levels: readonly ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+      for (const level of levels) {
+        await addFile('settings.json', JSON.stringify({ defaultThinkingLevel: level }));
+        const folder = await loadAgentFolder(dir);
+        expect(folder.settings).toEqual({ defaultThinkingLevel: level });
+        expect(warningsText(folder)).not.toContain('defaultThinkingLevel');
+      }
+    });
+
     it('should warn and drop an invalid thinking level', async () => {
       await appendSystemMd();
       await addFile('settings.json', JSON.stringify({ defaultThinkingLevel: 'ultra' }));
@@ -367,6 +378,49 @@ describe('loadAgentFolder', () => {
       const folder = await loadAgentFolder(dir);
       expect(folder.skillsDir).toBeNull();
       expect(folder.warnings).toEqual(['skills must be a directory — ignored']);
+    });
+  });
+
+  describe('schedule/', () => {
+    it('should warn when schedules is not a directory', async () => {
+      await appendSystemMd();
+      await addFile('schedule', '');
+      const folder = await loadAgentFolder(dir);
+      expect(folder.scheduleDir).toBeNull();
+      expect(folder.warnings).toEqual(['schedule must be a directory — ignored']);
+    });
+
+    it('should honor a symlink to a directory (Dirent.isDirectory() does not follow symlinks)', async () => {
+      await appendSystemMd();
+      await addOutsideFile('shared-schedule/standup.md', "---\ncron: '0 9 * * 1-5'\ncwd: ~/dev\n---\nDo it.\n");
+      await symlink(join(outside, 'shared-schedule'), join(dir, 'schedule'));
+      const folder = await loadAgentFolder(dir);
+      expect(folder.scheduleDir).toBe(join(dir, 'schedule'));
+      expect(folder.warnings).toEqual([]);
+    });
+
+    it('should warn when schedules is a symlink to a file, not a directory', async () => {
+      await appendSystemMd();
+      await addOutsideFile('schedules-target.txt', 'not a dir');
+      await symlink(join(outside, 'schedules-target.txt'), join(dir, 'schedule'));
+      const folder = await loadAgentFolder(dir);
+      expect(folder.scheduleDir).toBeNull();
+      expect(folder.warnings).toEqual(['schedule must be a directory — ignored']);
+    });
+
+    it('should warn, not throw, when schedules is a broken symlink', async () => {
+      await appendSystemMd();
+      await symlink(join(dir, 'missing-schedules-target'), join(dir, 'schedule'));
+      const folder = await loadAgentFolder(dir);
+      expect(folder.scheduleDir).toBeNull();
+      expect(folder.warnings).toEqual(['schedule must be a directory — ignored']);
+    });
+
+    it('should be null when absent', async () => {
+      await appendSystemMd();
+      const folder = await loadAgentFolder(dir);
+      expect(folder.scheduleDir).toBeNull();
+      expect(folder.warnings).toEqual([]);
     });
   });
 
@@ -798,14 +852,23 @@ describe('loadAgentFolder', () => {
   describe('unknown and reserved entries', () => {
     it('should warn once for reserved dirs and once for unknown entries', async () => {
       await appendSystemMd();
-      await mkdir(join(dir, 'schedules'));
       await mkdir(join(dir, 'channels'));
       await addFile('notes.txt', '');
       const folder = await loadAgentFolder(dir);
       expect(folder.warnings).toEqual([
-        'reserved for a future cradle release, ignored: schedules, channels',
+        'reserved for a future cradle release, ignored: channels',
         'not part of the agent folder format, ignored: notes.txt'
       ]);
+    });
+
+    it('should point a plural schedules/ at the singular schedule/', async () => {
+      await appendSystemMd();
+      await mkdir(join(dir, 'schedules'));
+      const folder = await loadAgentFolder(dir);
+      expect(folder.warnings).toEqual([
+        'not part of the agent folder format, ignored: schedules — did you mean schedule/ (singular)?'
+      ]);
+      expect(folder.scheduleDir).toBeNull();
     });
 
     it('should not warn for conventional repo files', async () => {

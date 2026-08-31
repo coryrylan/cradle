@@ -10,6 +10,7 @@ A folder with a `SYSTEM.md` or `APPEND_SYSTEM.md` is a complete agent. Everythin
 my-agent/
   extensions/         optional   pi extensions: custom tools, commands, hooks
   sandbox/            optional   sandbox posture (nono.json, sbx.json)
+  schedule/           optional   cron-driven scheduled runs
   skills/             optional   markdown playbooks, loaded when relevant
   settings.json       optional   pi-native settings (model selection)
   models.json         optional   pi-native custom provider definitions

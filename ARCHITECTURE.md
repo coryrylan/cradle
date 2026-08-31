@@ -13,7 +13,7 @@ my-agent/
   skills/            optional   markdown playbooks, loaded when relevant
   extensions/        optional   pi extensions: custom tools, commands, hooks
   sandbox/           optional   sandbox posture (nono.json, sbx.json)
-  schedules/         reserved   planned — cron-driven runs
+  schedule/          optional   cron-driven runs (launchd on macOS, systemd on Linux)
   subagents/         reserved   planned — delegated specialist agents
   channels/          reserved   planned — Slack/Discord/web surfaces
   connections/       reserved   planned — service auth for tools
@@ -208,6 +208,41 @@ The load-bearing caveat: a per-sandbox `allow` rule only ADDS to your machine's 
 
 `--dry-run` previews the full sbx setup sequence, not just the final command: the `sbx create`/`sbx policy`/provision argvs print in the order materialize runs them, followed by the final `sbx exec` argv wrapping the composed pi command (the printed provision argv is unpinned — the host pi version pin only resolves at materialize time, the same precedent as package `-e` entries). A silent, non-`--verbose` sbx run prints `🔒 Sandbox Active (sbx)` in place of nono's `🔒 Sandbox Active`.
 
+### `schedule/`
+
+Cron-driven runs of this agent. Each `schedule/<task>.md` is one task: YAML frontmatter declaring when it fires and where, and a Markdown body that becomes the prompt.
+
+```yaml
+---
+name: Daily standup report
+description: Summarize yesterday's commits and open PRs.
+cron: '0 9 * * 1-5'
+cwd: ~/dev/my-project
+---
+```
+
+| Key           | Required | Meaning                                                                                      |
+| ------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `cron`        | yes      | five-field expression, or an `@hourly` / `@daily` / `@weekly` / `@monthly` / `@yearly` macro |
+| `cwd`         | yes      | the directory the run starts in — absolute, `~/`, or `$HOME/`                                |
+| `name`        | no       | display label for `cradle schedule list` and the pi session name; defaults to the filename   |
+| `description` | no       | shown in `cradle schedule list`                                                              |
+
+Everything below the closing `---` is the prompt, verbatim. The filename is the task's identity (`daily-report.md` → `daily-report`), so it must be a bare name — letters, digits, `.`, `-`, `_` — since it also becomes a launchd label and a systemd unit name. Skills need no wiring: the folder's `skills/` already rides `--skill`, so a body can name a skill exactly as an interactive turn would.
+
+A scheduled run is an ordinary `cradle run` with a working directory and a prompt, so it adds no new sandbox policy. `cwd` is granted read+write exactly as it is interactively, and writing outside it still requires an explicit `sandbox/nono.json` grant — nothing in `schedule/` widens what an agent can reach. Runs are non-interactive (`--print`) and pass `--no-approve`, so an unattended job never blocks on a trust prompt for a project-local `.pi/` and never auto-trusts one either.
+
+`cradle schedule install` writes one native OS timer per task — a launchd LaunchAgent on macOS, a systemd user timer on Linux — each invoking `cradle schedule run <folder> <task>`. Both are preferred over cron because they run a missed calendar job after the machine wakes, where cron silently skips it. Task output is captured at `~/.cradle/agents/<id>/schedule/<task>.log`.
+
+```sh
+cradle schedule list ./my-agent                # tasks, cron, next fire
+cradle schedule install ./my-agent             # write + load every task's timer
+cradle schedule run ./my-agent daily-report    # fire once now, in the foreground
+cradle schedule remove ./my-agent              # unload + delete
+```
+
+Two cron expressions are rejected rather than silently mistranslated: one constraining both day-of-month and day-of-week (cron ORs those two fields, while launchd and systemd both AND them), and one whose launchd calendar expansion would exceed 500 entries.
+
 ## How cradle composes the pi invocation
 
 Cradle translates the folder into explicit pi flags — never into files inside `~/.pi/agent`:
@@ -221,6 +256,7 @@ Cradle translates the folder into explicit pi flags — never into files inside 
 | `settings.json` `packages`        | per-agent npm install → each package's selected extensions as `-e` |
 | `skills/`                         | `--skill <dir>`                                                    |
 | `extensions/`                     | `-e <file>` per extension, verbatim, loaded last                   |
+| `schedule/<task>.md`              | `--print --name <label> --no-approve -- <prompt>`, from its `cwd`  |
 | session history                   | `--session-dir ~/.cradle/agents/<id>/sessions`                     |
 | isolation from personal pi config | `--no-extensions --no-skills --no-prompt-templates`                |
 
@@ -234,7 +270,7 @@ Consequences, accepted for v1:
 
 - pi still reads the personal `~/.pi/agent/settings.json` (cosmetics like theme — the only place those keys apply; the folder's own copies warn, see [`settings.json`](#settingsjson)), shares its `auth.json`, and writes trust decisions to the personal `trust.json`. Model selection never leaks: agent-defined provider/model/thinking are always passed explicitly.
 - `--no-extensions` also disables the _personal_ `~/.pi/agent/settings.json`'s own `packages` inside agent runs — those never load, intentional isolation. This is distinct from an agent folder's own `settings.json` `packages`, which cradle resolves and installs itself (see [`settings.json`](#settingsjson) above) and loads via explicit `-e` flags, since explicit `-e` paths load even under `--no-extensions`.
-- Project context files (`AGENTS.md`/`CLAUDE.md` in your cwd) still load; that's the target project's context and it's desirable.
+- Project context files (`AGENTS.md`/`AGENTS.md` in your cwd) still load; that's the target project's context and it's desirable.
 
 One env var breaks the argv-only rule on purpose: sandboxed runs export `MISE_CACHE_DIR=~/.cradle/agents/<id>/mise-cache`. The generated per-agent profile deliberately denies the shared `~/Library/Caches/mise` — a poisoned `bin_paths` cache written there would redirect which binaries the user's later, unsandboxed mise execs resolve to, invisibly and machine-globally. Without an override, every sandboxed `mise exec` (which pi/nono resolution can trigger via mise shims) fails to write that cache and spams `mise WARN failed to write cache file`. Pointing `MISE_CACHE_DIR` at a private cache inside the already-granted state dir instead gives mise a location it can write to — warnings gone, cache works — without ever exposing the shared host cache to a sandboxed process. mise creates the directory itself; cradle never pre-creates or wipes it. This doesn't undermine the argv rationale above: it configures mise, not pi, and pi's own configuration stays entirely on argv. The failure mode if this env var were ever stripped is benign — mise falls back to the shared cache and the warnings return, nothing breaks.
 
@@ -245,9 +281,9 @@ One env var breaks the argv-only rule on purpose: sandboxed runs export `MISE_CA
 3. `skills/` — v1
 4. `extensions/` — v1
 5. `sandbox/` — v1
-6. `schedules/` — planned: cron-driven durable runs (daily reports, digests)
+6. `schedule/` — v1: cron-driven durable runs (daily reports, digests)
 7. `subagents/` — planned: delegated specialist agents
 8. `channels/` — planned: the same agent on Slack, Discord, Teams, web
 9. `connections/` — planned: service auth (GitHub, Stripe, Linear) for tools
 
-Future dirs (`schedules/`, `subagents/`, `channels/`, `connections/`) will land as sugar over the same substrate: generated or pass-through pi extensions.
+Future dirs (`subagents/`, `channels/`, `connections/`) will land as sugar over the same substrate: generated or pass-through pi extensions.

@@ -8,7 +8,7 @@
 
 # Aliases
 
-`cradle run <ref>` accepts a bare name instead of a path. A bare name is looked up in a global name → folder map at `~/.cradle/settings.json`, so agents you keep far from any project don't need a full path from every working directory:
+`cradle run <ref>` and `cradle schedule <action> <ref>` both accept a bare name instead of a path. A bare name is looked up in a global name → folder map at `~/.cradle/settings.json`, so agents you keep far from any project don't need a full path from every working directory:
 
 ```json
 {
