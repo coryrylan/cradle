@@ -1,3 +1,9 @@
+## [1.4.0](https://github.com/coryrylan/cradle/compare/cradle-v1.3.1...cradle-v1.4.0) (2026-08-31)
+
+### Features
+
+* **cli:** support schedules ([28f2e71](https://github.com/coryrylan/cradle/commit/28f2e714209e1e0e33cf22b7783e8730cd6ba232))
+
 ## [1.3.1](https://github.com/coryrylan/cradle/compare/cradle-v1.3.0...cradle-v1.3.1) (2026-08-30)
 
 ### Bug Fixes
