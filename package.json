@@ -85,7 +85,7 @@
     "@nvidia-elements/core": "2.6.0",
     "@nvidia-elements/styles": "2.1.3",
     "@nvidia-elements/themes": "2.0.1",
-    "conventional-changelog-conventionalcommits": "9.3.1",
+    "conventional-changelog-conventionalcommits": "10.4.0",
     "husky": "9.1.7",
     "knip": "6.33.0",
     "prettier": "3.9.6",
