@@ -229,7 +229,7 @@
     "@types/bun": "catalog:",
     "@types/yargs": "17.0.35",
     "eslint": "catalog:",
-    "eslint-plugin-jsdoc": "64.2.1",
+    "eslint-plugin-jsdoc": "64.3.3",
     "typescript": "catalog:",
     "typescript-eslint": "catalog:"
   }
