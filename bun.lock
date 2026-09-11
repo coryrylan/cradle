@@ -27,7 +27,7 @@
     },
     "projects/cli": {
       "name": "@coryrylan/cradle",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "bin": {
         "cradle": "dist/index.js",
       },
@@ -58,7 +58,7 @@
       "devDependencies": {
         "@11ty/eleventy": "3.1.6",
         "@11ty/eleventy-plugin-vite": "8.0.0",
-        "@nvidia-elements/lint": "2.4.0",
+        "@nvidia-elements/lint": "2.5.2",
         "eslint": "catalog:",
         "markdown-it": "15.0.1",
       },
@@ -226,7 +226,7 @@
 
     "@nvidia-elements/forms": ["@nvidia-elements/forms@2.0.6", "", {}, "sha512-+pJStsxszCahu9z5LX8JSTzGqitxVdVF0pD7SrLgmiI0pkubpxgppUgzjydFjXpQmkHGbVkfxnq2VQkxb3tFDA=="],
 
-    "@nvidia-elements/lint": ["@nvidia-elements/lint@2.4.0", "", { "dependencies": { "@eslint/css": "1.2.0", "@eslint/js": "10.0.1", "@eslint/json": "1.2.0", "@html-eslint/eslint-plugin": "0.61.0", "@html-eslint/parser": "0.61.0", "minisearch": "7.2.0" }, "peerDependencies": { "@nvidia-elements/themes": "^2.0.1", "eslint": ">= 10" } }, "sha512-3/5FJTyDADEeVi8/mwKjWf/TPo6NQA1tuKRB2YKJmyZMhG4mUSmBxorSZqiD2L0PSCgNzNE8Je1bTLSaM+qz9A=="],
+    "@nvidia-elements/lint": ["@nvidia-elements/lint@2.5.2", "", { "dependencies": { "@eslint/css": "1.2.0", "@eslint/js": "10.0.1", "@eslint/json": "1.2.0", "@html-eslint/eslint-plugin": "0.61.0", "@html-eslint/parser": "0.61.0", "minisearch": "7.2.0" }, "peerDependencies": { "@nvidia-elements/themes": "^2.0.1", "eslint": ">= 10" } }, "sha512-2VuOpz8ggqMdm1vUi0hHE9Hmw2qBXnnr2zN/Vr1lKtS1OyA8Yu4x5YXDMlL1VDa6mSdcHYk6xkyGHZUiC2Pidw=="],
 
     "@nvidia-elements/styles": ["@nvidia-elements/styles@2.1.3", "", { "peerDependencies": { "@nvidia-elements/themes": "^2.0.1" } }, "sha512-fJseQrQiGx3/3Ju5BzMFurw3QJE2VvEFEm58w98wJhkT8BV7sHhzIaEjUbTtlmvS2uvRUh4O1kt2ETfpJ+AMYA=="],
 
