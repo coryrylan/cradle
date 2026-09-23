@@ -8,7 +8,7 @@
 // `--dry-run` write plan and tests can assert both halves in-process without
 // ever spawning a real `launchctl`/`systemctl`.
 
-import { exists, mkdir, rm, writeFile } from 'node:fs/promises';
+import { exists, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -21,7 +21,7 @@ import { composeLaunchdTimer } from '../schedule/launchd.js';
 import { composeLingerCheckArgv, composeSystemdTimer, LINGER_HINT } from '../schedule/systemd.js';
 import type { TimerContext, TimerFile, TimerPlan, TimerStep } from '../schedule/timer.js';
 import { getErrorMessage } from '../setup/utils.js';
-import { requireBin, type WhichFn } from '../util/which.js';
+import { lookupBin, requireBin, type WhichFn } from '../util/which.js';
 
 /** `cradle schedule run` is NOT here: it executes the task in-process through `commands/run.ts`, so `cli.ts` routes it there instead. */
 export type ScheduleAction = 'list' | 'install' | 'remove';
@@ -49,6 +49,14 @@ interface ScheduleDeps {
   readonly now?: () => Date;
 }
 
+/**
+ * How the timer on disk relates to what this schedule file would compile to
+ * now. `stale` is the state that matters: the files exist, so the schedule
+ * looks live, but they were emitted from an older version of the `.md` and
+ * the OS is still firing the old cron.
+ */
+export type TimerStatus = 'installed' | 'stale' | 'not-installed';
+
 /** One `cradle schedule list` row — a broken cron is reported inline rather than aborting the whole listing. */
 export interface ScheduleRow {
   readonly slug: string;
@@ -57,7 +65,7 @@ export interface ScheduleRow {
   readonly cwd: string;
   readonly cronError?: string;
   readonly nextFire: Date | null;
-  readonly installed: boolean;
+  readonly status: TimerStatus;
 }
 
 /** One resolved schedule's composed timer, for `install`/`remove`/`run`. */
@@ -131,6 +139,8 @@ interface ScheduleActionContext {
   readonly platform: SupportedSchedulePlatform;
   readonly deps: ScheduleDeps;
   readonly dryRun: boolean;
+  /** False when `cradle` could not be resolved, so composed content carries the placeholder and cannot be compared. */
+  readonly cradleBinResolved: boolean;
 }
 
 /**
@@ -142,7 +152,7 @@ interface ScheduleActionContext {
 export async function planSchedule(flags: ScheduleFlags, deps: ScheduleDeps = {}): Promise<SchedulePlan> {
   const resolved = resolveScheduleDeps(flags, deps);
   const base = await loadScheduleContext(flags, resolved.home, resolved.cwd);
-  const cradleBin = requiresResolvedCradleBin(flags, resolved.dryRun) ? requireBin('cradle', deps.which) : 'cradle';
+  const cradleBin = resolveCradleBin(flags, resolved.dryRun, deps.which);
   const contextFor = contextFactory(base, { cradleBin, home: resolved.home, uid: resolved.uid });
   const ctx: ScheduleActionContext = {
     flags,
@@ -150,7 +160,8 @@ export async function planSchedule(flags: ScheduleFlags, deps: ScheduleDeps = {}
     contextFor,
     platform: resolved.platform,
     deps,
-    dryRun: resolved.dryRun
+    dryRun: resolved.dryRun,
+    cradleBinResolved: cradleBin !== CRADLE_BIN_PLACEHOLDER
   };
   return flags.action === 'list' ? planScheduleList(ctx) : planScheduleAction(ctx);
 }
@@ -193,10 +204,35 @@ function requiresResolvedCradleBin(flags: ScheduleFlags, dryRun: boolean): boole
   return flags.action === 'install' && !dryRun;
 }
 
+/**
+ * `install` must have a real path or fail loudly. `list` resolves
+ * best-effort, because it compares what it composes against the installed
+ * file byte for byte and `cradleBin` is written into that file — composing
+ * with the bare placeholder would report every installed timer as stale. When
+ * `cradle` is unresolvable the placeholder is kept and the comparison is
+ * skipped rather than reported wrongly (see `timerFileState`). `remove`,
+ * `run`, and `--dry-run` neither persist nor compare the path, so they stay
+ * on the placeholder and never touch `which` at all.
+ */
+const CRADLE_BIN_PLACEHOLDER = 'cradle';
+
+function resolveCradleBin(flags: ScheduleFlags, dryRun: boolean, which: WhichFn | undefined): string {
+  if (requiresResolvedCradleBin(flags, dryRun)) return requireBin('cradle', which);
+  if (flags.action !== 'list') return CRADLE_BIN_PLACEHOLDER;
+  return lookupBin('cradle', which) ?? CRADLE_BIN_PLACEHOLDER;
+}
+
 async function planScheduleList(ctx: ScheduleActionContext): Promise<SchedulePlan> {
   const now = ctx.deps.now ?? ((): Date => new Date());
   const rows = await Promise.all(
-    ctx.base.schedules.map(schedule => buildScheduleRow(schedule, ctx.contextFor(schedule), ctx.platform, now))
+    ctx.base.schedules.map(schedule =>
+      buildScheduleRow(schedule, {
+        timer: ctx.contextFor(schedule),
+        platform: ctx.platform,
+        now,
+        cradleBinResolved: ctx.cradleBinResolved
+      })
+    )
   );
   return {
     action: 'list',
@@ -263,13 +299,16 @@ function composeTimerPlan(context: TimerContext, platform: SupportedSchedulePlat
   return platform === 'darwin' ? composeLaunchdTimer(context, fields) : composeSystemdTimer(context, fields);
 }
 
+interface ScheduleRowContext {
+  readonly timer: TimerContext;
+  readonly platform: SupportedSchedulePlatform;
+  readonly now: () => Date;
+  /** False when `cradle` could not be resolved — `timerFileState` then skips content comparison. */
+  readonly cradleBinResolved: boolean;
+}
+
 /** One `list` row. A cron that fails to parse is reported inline (`cronError`) instead of throwing — one bad task must not hide the others. */
-async function buildScheduleRow(
-  schedule: Schedule,
-  context: TimerContext,
-  platform: SupportedSchedulePlatform,
-  now: () => Date
-): Promise<ScheduleRow> {
+async function buildScheduleRow(schedule: Schedule, context: ScheduleRowContext): Promise<ScheduleRow> {
   const base = { slug: schedule.slug, name: schedule.name, cron: schedule.cron, cwd: schedule.cwd };
   // Composing the timer is inside the guard, not just parsing: both emitters
   // reject expressions their backend cannot encode (launchd's dict cap,
@@ -277,16 +316,34 @@ async function buildScheduleRow(
   // its own row rather than aborting every other row in the folder.
   try {
     const fields = parseCron(schedule.cron);
-    const timerPlan = composeTimerPlan(context, platform, fields);
-    return { ...base, nextFire: nextFire(fields, now()), installed: await allFilesExist(timerPlan.files) };
+    const timerPlan = composeTimerPlan(context.timer, context.platform, fields);
+    return {
+      ...base,
+      nextFire: nextFire(fields, context.now()),
+      status: await timerStatus(timerPlan.files, context.cradleBinResolved)
+    };
   } catch (error) {
-    return { ...base, cronError: getErrorMessage(error), nextFire: null, installed: false };
+    return { ...base, cronError: getErrorMessage(error), nextFire: null, status: 'not-installed' };
   }
 }
 
-async function allFilesExist(files: readonly TimerFile[]): Promise<boolean> {
-  const checks = await Promise.all(files.map(file => exists(file.path)));
-  return checks.every(Boolean);
+type TimerFileState = 'missing' | 'differs' | 'matches';
+
+// Existence alone cannot distinguish a current timer from one emitted before
+// the schedule file was edited, and that difference is the whole point of the
+// status: launchd/systemd keep firing the old artifact, so a drifted timer
+// that reports "installed" is a silent wrong answer.
+async function timerFileState(file: TimerFile, compareContent: boolean): Promise<TimerFileState> {
+  if (!(await exists(file.path))) return 'missing';
+  if (!compareContent) return 'matches';
+  return (await readFile(file.path, 'utf8')) === file.content ? 'matches' : 'differs';
+}
+
+/** Every file absent is a clean "never installed"; anything partial or edited is drift. */
+async function timerStatus(files: readonly TimerFile[], compareContent: boolean): Promise<TimerStatus> {
+  const states = await Promise.all(files.map(file => timerFileState(file, compareContent)));
+  if (states.every(state => state === 'missing')) return 'not-installed';
+  return states.every(state => state === 'matches') ? 'installed' : 'stale';
 }
 
 /** Format `list`'s rows into the printed report — pure, mirroring `doctor.ts`'s `runDoctor`/`formatDoctorReport` split. */
@@ -295,15 +352,27 @@ export function formatScheduleList(rows: readonly ScheduleRow[]): string {
   return rows.map(formatScheduleRow).join('\n\n');
 }
 
+const TIMER_STATUS_LABELS: { readonly [key in TimerStatus]: string } = {
+  installed: 'installed',
+  stale: 'stale — the installed timer predates this file; run `cradle schedule install` to update it',
+  'not-installed': 'not installed'
+};
+
 function formatScheduleRow(row: ScheduleRow): string {
-  const status = row.installed ? 'installed' : 'not installed';
-  const cronLine = row.cronError !== undefined ? `INVALID: ${row.cronError}` : `next: ${formatNextFire(row.nextFire)}`;
   return [
     `${row.slug} — ${row.name}`,
-    `  cron:  ${row.cron}  (${cronLine})`,
+    `  cron:  ${row.cron}  (${formatCronLine(row)})`,
     `  cwd:   ${row.cwd}`,
-    `  timer: ${status}`
+    `  timer: ${TIMER_STATUS_LABELS[row.status]}`
   ].join('\n');
+}
+
+// A stale timer fires the OLD cron, so this row's next-fire is what the
+// schedule would do once reinstalled — never a time the OS will honor today.
+function formatCronLine(row: ScheduleRow): string {
+  if (row.cronError !== undefined) return `INVALID: ${row.cronError}`;
+  const label = row.status === 'stale' ? 'next after install' : 'next';
+  return `${label}: ${formatNextFire(row.nextFire)}`;
 }
 
 function formatNextFire(when: Date | null): string {

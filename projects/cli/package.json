@@ -45,7 +45,7 @@
   },
   "homepage": "https://github.com/coryrylan/cradle/tree/main/projects/cli#readme",
   "engines": {
-    "bun": ">=1.4.0"
+    "bun": ">=1.4.2"
   },
   "publishConfig": {
     "access": "public"

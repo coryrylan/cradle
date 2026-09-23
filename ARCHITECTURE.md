@@ -235,11 +235,13 @@ A scheduled run is an ordinary `cradle run` with a working directory and a promp
 `cradle schedule install` writes one native OS timer per task — a launchd LaunchAgent on macOS, a systemd user timer on Linux — each invoking `cradle schedule run <folder> <task>`. Both are preferred over cron because they run a missed calendar job after the machine wakes, where cron silently skips it. Task output is captured at `~/.cradle/agents/<id>/schedule/<task>.log`.
 
 ```sh
-cradle schedule list ./my-agent                # tasks, cron, next fire
+cradle schedule list ./my-agent                # tasks, cron, next fire, timer status
 cradle schedule install ./my-agent             # write + load every task's timer
 cradle schedule run ./my-agent daily-report    # fire once now, in the foreground
 cradle schedule remove ./my-agent              # unload + delete
 ```
+
+Editing a task's `.md` does not re-emit its timer, so the loaded artifact can drift from the file that describes it. `cradle schedule list` therefore reports `installed` / `stale` / `not installed` by composing each timer and comparing it byte for byte against what is on disk, rather than testing that the path merely exists — a drifted timer keeps firing the old cron, and reporting it as installed would be a silent wrong answer.
 
 Two cron expressions are rejected rather than silently mistranslated: one constraining both day-of-month and day-of-week (cron ORs those two fields, while launchd and systemd both AND them), and one whose launchd calendar expansion would exceed 500 entries.
 

@@ -19,7 +19,7 @@ cradle run . --sandbox-backend sbx  # run under the sbx Docker Sandboxes microVM
 cradle run . --no-sandbox           # run pi directly (debug)
 cradle run . --dry-run -- --resume  # print the write plan + command; forward `--resume` to pi
 
-cradle schedule list ./my-agent              # tasks, cron, next fire, installed?
+cradle schedule list ./my-agent              # tasks, cron, next fire, timer status
 cradle schedule install ./my-agent           # write + load a native OS timer per task
 cradle schedule install ./my-agent --dry-run # print what would be written, touch nothing
 cradle schedule run ./my-agent daily-report  # fire one task now, in the foreground
