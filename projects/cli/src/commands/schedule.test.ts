@@ -124,25 +124,36 @@ describe('planSchedule', () => {
       await mkdir(join(root, 'work'), { recursive: true });
     });
 
-    it('should list every schedule with cron/cwd/next-fire and installed: false before install', async () => {
+    it("should list every schedule with cron/cwd/next-fire and status 'not-installed' before install", async () => {
       const plan = await planSchedule({ dir: agentDir, action: 'list' }, darwinDeps());
       expect(plan.rows).toHaveLength(1);
       const [row] = plan.rows;
       expect(row?.slug).toBe('nightly');
       expect(row?.name).toBe('Nightly report');
       expect(row?.cwd).toBe(join(root, 'work'));
-      expect(row?.installed).toBe(false);
+      expect(row?.status).toBe('not-installed');
       expect(row?.nextFire).not.toBeNull();
       expect(row?.cronError).toBeUndefined();
     });
 
-    it('should never call requireBin("cradle") for list — no bin is needed to read schedules', async () => {
-      const throwingWhich = (): never => {
-        throw new Error('Which must not be called for list');
-      };
+    it('should list without throwing when "cradle" is unresolvable, unlike install\'s requireBin', async () => {
+      const missingWhich = createWhichStub({});
       await expect(
-        planSchedule({ dir: agentDir, action: 'list' }, darwinDeps({ which: throwingWhich }))
+        planSchedule({ dir: agentDir, action: 'list' }, darwinDeps({ which: missingWhich }))
       ).resolves.toBeDefined();
+      await expect(
+        planSchedule({ dir: agentDir, action: 'install' }, darwinDeps({ which: missingWhich }))
+      ).rejects.toThrow('not found on PATH');
+    });
+
+    it('should not report a stale timer when "cradle" is unresolvable, since the composed content is a placeholder', async () => {
+      const installPlan = await planSchedule({ dir: agentDir, action: 'install' }, darwinDeps());
+      await materializeSchedule(installPlan, { run: okRunner() });
+      const listPlan = await planSchedule(
+        { dir: agentDir, action: 'list' },
+        darwinDeps({ which: createWhichStub({}) })
+      );
+      expect(listPlan.rows[0]?.status).toBe('installed');
     });
 
     it('should still list a schedule whose cron overflows the launchd dict cap, instead of aborting', async () => {
@@ -171,16 +182,42 @@ describe('planSchedule', () => {
       const broken = plan.rows.find(row => row.slug === 'broken');
       expect(broken?.cronError).toContain('Invalid cron expression');
       expect(broken?.nextFire).toBeNull();
-      expect(broken?.installed).toBe(false);
+      expect(broken?.status).toBe('not-installed');
       // The other, valid schedule is unaffected.
       expect(plan.rows.find(row => row.slug === 'nightly')?.cronError).toBeUndefined();
     });
 
-    it('should report installed: true once the timer files exist on disk (darwin)', async () => {
+    it("should report status 'installed' once the timer files exist on disk (darwin)", async () => {
       const installPlan = await planSchedule({ dir: agentDir, action: 'install' }, darwinDeps());
       await materializeSchedule(installPlan, { run: okRunner() });
       const listPlan = await planSchedule({ dir: agentDir, action: 'list' }, darwinDeps());
-      expect(listPlan.rows[0]?.installed).toBe(true);
+      expect(listPlan.rows[0]?.status).toBe('installed');
+    });
+
+    it("should report status 'stale' when the cron changes after install, instead of a passing 'installed'", async () => {
+      const installPlan = await planSchedule({ dir: agentDir, action: 'install' }, darwinDeps());
+      await materializeSchedule(installPlan, { run: okRunner() });
+      await addSchedule(
+        'nightly.md',
+        { name: 'Nightly report', cwd: join(root, 'work'), cron: "'0 4 * * 1-5'" },
+        'Summarize.'
+      );
+      const listPlan = await planSchedule({ dir: agentDir, action: 'list' }, darwinDeps());
+      expect(listPlan.rows[0]?.status).toBe('stale');
+      const report = formatScheduleList(listPlan.rows);
+      expect(report).toContain('stale');
+      expect(report).toContain('cradle schedule install');
+      // The old timer is what fires, so the row must not present this as a live next-fire.
+      expect(report).toContain('next after install');
+    });
+
+    it("should report status 'stale' when only one of systemd's unit pair survives", async () => {
+      const installPlan = await planSchedule({ dir: agentDir, action: 'install' }, linuxDeps());
+      await materializeSchedule(installPlan, { run: okRunner() });
+      const [, timerUnit] = installPlan.targets[0]?.timerPlan.files ?? [];
+      await rm(timerUnit?.path ?? '', { force: true });
+      const listPlan = await planSchedule({ dir: agentDir, action: 'list' }, linuxDeps());
+      expect(listPlan.rows[0]?.status).toBe('stale');
     });
 
     it('should format an empty list distinctly', () => {

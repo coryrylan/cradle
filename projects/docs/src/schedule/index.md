@@ -35,7 +35,7 @@ A malformed task is dropped with a warning rather than failing the whole directo
 ## Commands
 
 ```sh
-cradle schedule list ./my-agent                # tasks, cron, next fire
+cradle schedule list ./my-agent                # tasks, cron, next fire, timer status
 cradle schedule install ./my-agent             # write + load every task's timer
 cradle schedule install ./my-agent --dry-run   # print what would be written, touch nothing
 cradle schedule run ./my-agent daily-report    # fire once now, in the foreground
@@ -51,6 +51,18 @@ cradle schedule install assistant
 ```
 
 The alias is resolved to an absolute path *before* the timer is written, and that absolute path is what the timer records. An installed task keeps firing correctly even if you later rename the alias or remove it from `~/.cradle/settings.json`.
+
+### Timer status
+
+Editing a task's `.md` does not touch the timer already loaded into launchd or systemd — the OS keeps firing the artifact written by the last `install`. `cradle schedule list` compares each installed timer against what the task file compiles to now and reports one of three states:
+
+| `timer:` | Meaning |
+| --- | --- |
+| `installed` | the loaded timer matches the task file |
+| `stale` | a timer is loaded, but it predates the task file — the OS is still firing the *old* schedule |
+| `not installed` | no timer for this task |
+
+`stale` is the state to watch for: the task looks scheduled and its next-fire time looks right, but that time is what the schedule *would* do once reinstalled, so the row labels it `next after install`. Re-run `cradle schedule install` to make the loaded timer match.
 
 `cradle schedule run` is what an installed timer itself invokes — there is one way to run a task, whether you type it or launchd does. It is an ordinary agent run with the task's `cwd` as the working directory and the task's body as the prompt, so reproducing a scheduled run by hand is the same command the machine uses.
 
