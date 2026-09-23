@@ -1,3 +1,9 @@
+## [1.4.1](https://github.com/coryrylan/cradle/compare/cradle-v1.4.0...cradle-v1.4.1) (2026-09-23)
+
+### Bug Fixes
+
+* **cli:** update timer status reporting and improve schedule command documentation ([53a46cb](https://github.com/coryrylan/cradle/commit/53a46cba64ccef8a7439e1aee5b93ed045a3d4d6))
+
 ## [1.4.0](https://github.com/coryrylan/cradle/compare/cradle-v1.3.1...cradle-v1.4.0) (2026-08-31)
 
 ### Features
