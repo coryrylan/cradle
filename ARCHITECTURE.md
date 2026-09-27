@@ -40,7 +40,7 @@ The agent runs in _your_ working directory (the target project); the agent folde
 ```json
 {
   "agents": {
-    "my-agent": { "path": "~/dev/agents/my-agent/" }
+    "my-agent": { "path": "~/dev/agents/my-agent/", "cwd": "~/dev/my-project/" }
   }
 }
 ```
@@ -50,7 +50,7 @@ The agent runs in _your_ working directory (the target project); the agent folde
 | `my-agent`                                 | alias table first; falls back to the relative path `./my-agent` only when no alias is defined |
 | `./my-agent`, `../x`, `/abs/x`, `~/x`, `.` | always a path — never an alias lookup                                                         |
 
-The alias resolves to an absolute path before `loadAgentFolder` sees it, so folder loading, the state dir, the generated nono profile, and argv composition are all untouched — `cradle run my-agent` and `cradle run ~/dev/agents/my-agent/` share the same state dir and `agentId`. When an alias shadows a same-named directory in your cwd, cradle warns and points at `./my-agent` as the escape hatch; when a bare name matches no alias and no cwd-relative directory either, the error names both misses.
+The alias path resolves to an absolute path before `loadAgentFolder` sees it. Optional `cwd` (absolute, `~/`, or `$HOME/`) overrides the terminal working directory for named interactive runs, including the sandbox project grant/mount; it must point to an existing directory, or the run fails before setup. A schedule's `cwd` overrides the alias default. Without it, the terminal cwd is used. `cradle run my-agent` and `cradle run ~/dev/agents/my-agent/` share the same state dir and `agentId`, but only the named alias uses its configured cwd. When an alias shadows a same-named directory in your cwd, cradle warns and points at `./my-agent` as the escape hatch; when a bare name matches no alias and no cwd-relative directory either, the error names both misses.
 
 **Config is not state.** `~/.cradle/settings.json`'s path derives from `home` only, entirely apart from `CRADLE_STATE_DIR` (which only ever means the state root described above, never the alias table) — redirecting where session history lives never silently moves where aliases are read from. The filename collides with an agent folder's own pi-native `settings.json`, but they are different files with different schema authorities: cradle owns the global one, so unknown keys there warn as schema errors; an agent folder's `settings.json` stays pi-schema — cradle never validates pi's keys, it warns only that keys it doesn't map won't reach pi.
 

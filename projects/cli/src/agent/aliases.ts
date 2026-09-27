@@ -27,6 +27,18 @@ export interface ResolveRefDeps {
   readonly cwd: string;
 }
 
+interface AgentAlias {
+  readonly path: string;
+  readonly cwd?: string;
+}
+
+interface ResolvedAgentRef {
+  readonly dir: string;
+  /** Only a named alias can override the terminal's working directory. */
+  readonly cwd?: string;
+  readonly warnings: readonly string[];
+}
+
 const BARE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /**
@@ -40,22 +52,23 @@ const BARE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
  * never `process.cwd()`, so the dep is the single source of truth for what the
  * lookup tested.
  */
-export async function resolveAgentRef(
-  ref: string,
-  deps: ResolveRefDeps
-): Promise<{ dir: string; warnings: readonly string[] }> {
+export async function resolveAgentRef(ref: string, deps: ResolveRefDeps): Promise<ResolvedAgentRef> {
   if (!isAliasName(ref)) return { dir: ref, warnings: [] };
 
   const settingsPath = join(deps.home, '.cradle', 'settings.json');
   const warnings: string[] = [];
   const aliases = await loadAgentAliases(settingsPath, warnings);
   const localDir = join(deps.cwd, ref);
-  const aliasPath = aliases.get(ref);
+  const alias = aliases.get(ref);
 
-  if (aliasPath !== undefined) {
-    const dir = resolve(expandHome(aliasPath, deps.home));
+  if (alias !== undefined) {
+    const dir = resolve(expandHome(alias.path, deps.home));
     if (await isDirectory(localDir)) warnings.push(shadowWarning(ref, dir));
-    return { dir, warnings };
+    return {
+      dir,
+      ...(alias.cwd !== undefined ? { cwd: resolve(expandHome(alias.cwd, deps.home)) } : {}),
+      warnings
+    };
   }
   if (await isDirectory(localDir)) return { dir: localDir, warnings };
   throw new Error(bothMissedMessage(ref, localDir, settingsPath, aliases));
@@ -81,7 +94,7 @@ async function isDirectory(path: string): Promise<boolean> {
  * everything else is warn-and-drop, since cradle is this file's schema
  * authority (unlike an agent folder's settings.json, which is pi-native).
  */
-async function loadAgentAliases(settingsPath: string, warnings: string[]): Promise<Map<string, string>> {
+async function loadAgentAliases(settingsPath: string, warnings: string[]): Promise<Map<string, AgentAlias>> {
   const text = await readTextIfExists(settingsPath);
   if (text === undefined) return new Map();
   const json = parseJson(text, settingsPath);
@@ -97,7 +110,7 @@ function readAgentsMap(
   record: { readonly [key: string]: JsonValue },
   settingsPath: string,
   warnings: string[]
-): Map<string, string> {
+): Map<string, AgentAlias> {
   const value = record['agents'];
   if (value === undefined) return new Map();
   if (!isRecord(value)) {
@@ -105,20 +118,26 @@ function readAgentsMap(
     return new Map();
   }
   const entries = Object.entries(value)
-    .map((pair): [string, string] | undefined => {
+    .map((pair): [string, AgentAlias] | undefined => {
       const [name, entry] = pair;
-      const path = readAgentPath(entry, name, settingsPath, warnings);
-      return path === undefined ? undefined : [name, path];
+      const alias = readAgentAlias(entry, name, settingsPath, warnings);
+      return alias === undefined ? undefined : [name, alias];
     })
-    .filter((entry): entry is [string, string] => entry !== undefined);
+    .filter((entry): entry is [string, AgentAlias] => entry !== undefined);
   return new Map(entries);
 }
 
-function readAgentPath(entry: JsonValue, name: string, settingsPath: string, warnings: string[]): string | undefined {
+function readAgentAlias(
+  entry: JsonValue,
+  name: string,
+  settingsPath: string,
+  warnings: string[]
+): AgentAlias | undefined {
   if (!isRecord(entry)) {
     warnings.push(`${settingsPath}: agents.${name} must be an object with a "path" — ignored`);
     return undefined;
   }
+  warnUnsupportedKeys(entry, `${settingsPath}: agents.${name}`, ['path', 'cwd'], warnings);
   const value = entry['path'];
   if (typeof value !== 'string' || value.trim() === '') {
     warnings.push(`${settingsPath}: agents.${name}.path must be a non-empty string — ignored`);
@@ -129,7 +148,20 @@ function readAgentPath(entry: JsonValue, name: string, settingsPath: string, war
     warnings.push(`${settingsPath}: agents.${name}.path must be an absolute, ~/, or $HOME/ path — ignored: ${value}`);
     return undefined;
   }
-  return value;
+  const cwd = readAliasCwd(entry['cwd'], name, settingsPath, warnings);
+  return { path: value, ...(cwd !== undefined ? { cwd } : {}) };
+}
+
+function readAliasCwd(
+  cwd: JsonValue | undefined,
+  name: string,
+  settingsPath: string,
+  warnings: string[]
+): string | undefined {
+  if (cwd === undefined) return undefined;
+  if (typeof cwd === 'string' && cwd.trim() !== '' && isPathShaped(cwd)) return cwd;
+  warnings.push(`${settingsPath}: agents.${name}.cwd must be an absolute, ~/, or $HOME/ path — ignored`);
+  return undefined;
 }
 
 /** Alias resolves, but a same-named directory also exists in cwd — the alias wins; point at the escape hatch. */
@@ -138,7 +170,12 @@ function shadowWarning(ref: string, dir: string): string {
 }
 
 /** Neither an alias nor a cwd-relative directory resolved — the one case this module throws. */
-function bothMissedMessage(ref: string, localDir: string, settingsPath: string, aliases: Map<string, string>): string {
+function bothMissedMessage(
+  ref: string,
+  localDir: string,
+  settingsPath: string,
+  aliases: Map<string, AgentAlias>
+): string {
   const known = aliases.size > 0 ? ` (known agents: ${[...aliases.keys()].join(', ')})` : '';
   return `Agent folder not found: ${localDir} — and no "agents.${ref}" entry in ${settingsPath}${known}`;
 }

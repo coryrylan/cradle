@@ -28,7 +28,7 @@ cradle schedule remove ./my-agent [task]     # unload + delete (every task, or o
 
 ## How `cradle run` works
 
-The agent runs in _your_ working directory — the agent folder is a parameter (default `.`), not a place cradle changes into. That means an agent folder can live anywhere on disk, or be referenced by a [global alias](../aliases/), while every run still operates on the project in your current shell.
+The agent runs in _your_ working directory by default — the agent folder is a parameter (default `.`), not a place cradle changes into. A [global alias](../aliases/) can set an optional startup `cwd` for named runs; a scheduled task's `cwd` takes precedence. `--dry-run` prints the effective cwd and the composed command.
 
 Everything after `--` is forwarded verbatim to `pi`. Use it for `pi`'s own flags, like `--resume` or `-p "prompt"`, without cradle trying to interpret them.
 
@@ -53,4 +53,4 @@ See [Sandbox](../sandbox/) for how `--offline`, `--allow-host`, `--no-sandbox`, 
 
 ## Doctor
 
-`cradle doctor` checks `pi` (required), and `nono`/`sbx`/`mise` plus your platform's timer backend — `launchctl` on macOS, `systemctl` on Linux — (recommended — each on your `PATH`, with version). `cradle run` reads the agent folder and launches `pi` in your current working directory — sandboxed inside `nono` or `sbx` when the folder declares `sandbox/nono.json`/`sandbox/sbx.json`, bare (with a warning) otherwise.
+`cradle doctor` checks `pi` (required), and `nono`/`sbx`/`mise` plus your platform's timer backend — `launchctl` on macOS, `systemctl` on Linux — (recommended — each on your `PATH`, with version). `cradle run` reads the agent folder and launches `pi` in your current working directory (or the alias's configured `cwd`) — sandboxed inside `nono` or `sbx` when the folder declares `sandbox/nono.json`/`sandbox/sbx.json`, bare (with a warning) otherwise.

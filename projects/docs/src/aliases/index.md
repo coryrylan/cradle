@@ -13,12 +13,12 @@
 ```json
 {
   "agents": {
-    "my-agent": { "path": "~/dev/agents/my-agent/" }
+    "my-agent": { "path": "~/dev/agents/my-agent/", "cwd": "~/dev/my-project/" }
   }
 }
 ```
 
-With that in place, `cradle run my-agent` works from anywhere.
+With that in place, `cradle run my-agent` works from anywhere and starts in `~/dev/my-project/`. `cwd` is optional; without it, the run starts in your terminal's current directory. Both `path` and `cwd` accept absolute paths, `~/`, or `$HOME/`. An incorrectly shaped `cwd` warns and falls back to the terminal directory without dropping the alias; a `cwd` that is not an existing directory stops the run before setup.
 
 ## Resolution
 
@@ -29,7 +29,7 @@ With that in place, `cradle run my-agent` works from anywhere.
 
 A bare name is anything without a path separator that doesn't start with `.` or `~`. Anything already path-shaped skips the alias table entirely.
 
-The alias resolves to an absolute path before the agent folder loads, so folder loading, the state dir, the generated `nono` profile, and the composed command are all untouched — `cradle run my-agent` and `cradle run ~/dev/agents/my-agent/` share the same state dir and agent ID.
+The alias path resolves to an absolute path before the agent folder loads. `cradle run my-agent` and `cradle run ~/dev/agents/my-agent/` share the same state dir and agent ID, but only the named alias uses its configured `cwd`. The effective cwd is used for the pi process and the sandbox's read-write project grant or mount. A scheduled task's own `cwd` takes precedence over the alias default.
 
 ## Shadowing
 

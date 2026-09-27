@@ -81,7 +81,7 @@ cradle schedule run ./my-agent daily-report  # fire one task now, in the foregro
 cradle schedule remove ./my-agent          # unload + delete
 ```
 
-The agent runs in _your_ working directory; the agent folder is a parameter (default `.`). Everything after `--` is forwarded verbatim to pi. `--dry-run` prints the generated-extension write plan and the composed command without spawning (and without requiring the bins to be installed). Per-agent state (generated extensions + session history) lives under `~/.cradle/agents/<name>-<hash>/`.
+The agent runs in _your_ working directory unless a named alias sets a default `cwd`; the agent folder is a parameter (default `.`). Everything after `--` is forwarded verbatim to pi. `--dry-run` prints the generated-extension write plan and the composed command without spawning (and without requiring the bins to be installed). Per-agent state (generated extensions + session history) lives under `~/.cradle/agents/<name>-<hash>/`.
 
 ### Scheduled runs (`schedule/`)
 
@@ -106,12 +106,12 @@ The `dir` positional accepts a bare name instead of a path — `cradle run my-ag
 ```json
 {
   "agents": {
-    "my-agent": { "path": "~/dev/agents/my-agent/" }
+    "my-agent": { "path": "~/dev/agents/my-agent/", "cwd": "~/dev/my-project/" }
   }
 }
 ```
 
-A bare name (no `/`, not `.`/`~`-led) checks the alias table first, falling back to the cwd-relative path (`./my-agent`) when no alias is defined — anything already path-shaped (`./x`, `../x`, `/abs/x`, `~/x`, `.`) is never looked up as an alias. See [ARCHITECTURE.md](../../ARCHITECTURE.md#global-agent-aliases) for the full resolution rules.
+The optional `cwd` sets the startup directory for `cradle run my-agent`; without it, the terminal's cwd is used. Like `path`, it accepts absolute, `~/`, and `$HOME/` paths. It must point to an existing directory, or the run fails before setup. It also determines the sandbox's project grant or mount; a scheduled task's `cwd` takes precedence. `--dry-run` prints the effective cwd alongside the command. A bare name (no `/`, not `.`/`~`-led) checks the alias table first, falling back to the cwd-relative path (`./my-agent`) when no alias is defined — anything already path-shaped (`./x`, `../x`, `/abs/x`, `~/x`, `.`) is never looked up as an alias. See [ARCHITECTURE.md](../../ARCHITECTURE.md#global-agent-aliases) for the full resolution rules.
 
 An agent folder can declare a sandbox posture for either backend: `sandbox/nono.json` (the OS-policy sandbox — covered in this section) or `sandbox/sbx.json` (the Docker Sandboxes microVM — see [Docker Sandboxes backend](#docker-sandboxes-backend-sandboxsbxjson) below), or both. `--sandbox-backend <nono|sbx>` picks the backend explicitly and forces it on; bare `--sandbox` uses whichever backend the folder declares, defaulting to nono, and nono wins when a folder declares both (with a warning naming `--sandbox-backend sbx` as the override).
 

@@ -22,8 +22,8 @@ export function killOn(proc: Killable, signal: ForwardableSignal): () => void {
  * `env` entries override the inherited `process.env` (used for the
  * sandboxed-run `MISE_CACHE_DIR`, see `agent/launch.ts`'s `composeEnv`).
  * `cwd`, when given, is `RunPlan.cwd` — the effective working directory,
- * which differs from `process.cwd()` only for a `--schedule` run (see
- * `commands/run.ts`'s `resolveScheduledRun`).
+ * which can differ from `process.cwd()` for a named alias or a scheduled run
+ * (see `commands/run.ts`'s `planRun`).
  */
 export async function runForeground(
   argv: readonly string[],
