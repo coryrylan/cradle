@@ -1,3 +1,9 @@
+## [1.5.0](https://github.com/coryrylan/cradle/compare/cradle-v1.4.1...cradle-v1.5.0) (2026-09-27)
+
+### Features
+
+* **cli:** support agent default dir ([554602a](https://github.com/coryrylan/cradle/commit/554602ac5e92786dc1b65400fec7f720663a6c0b))
+
 ## [1.4.1](https://github.com/coryrylan/cradle/compare/cradle-v1.4.0...cradle-v1.4.1) (2026-09-23)
 
 ### Bug Fixes
