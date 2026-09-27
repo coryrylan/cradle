@@ -344,9 +344,9 @@ describe('planRun', () => {
 });
 
 describe('planRun alias resolution', () => {
-  async function writeAliasSettings(aliasHome: string, name: string, path: string): Promise<void> {
+  async function writeAliasSettings(aliasHome: string, name: string, path: string, cwd?: string): Promise<void> {
     await mkdir(join(aliasHome, '.cradle'), { recursive: true });
-    await writeFile(join(aliasHome, '.cradle', 'settings.json'), JSON.stringify({ agents: { [name]: { path } } }));
+    await writeFile(join(aliasHome, '.cradle', 'settings.json'), JSON.stringify({ agents: { [name]: { path, cwd } } }));
   }
 
   it('should resolve a bare alias name to the same plan as the absolute-path form', async () => {
@@ -361,6 +361,66 @@ describe('planRun alias resolution', () => {
     } finally {
       await rm(aliasHome, { recursive: true, force: true });
     }
+  });
+
+  it('should use the alias cwd for the spawn, nono grant, and linked git dir', async () => {
+    const aliasHome = join(root, 'home');
+    const target = join(root, 'project');
+    const linkedGitDir = join(root, 'main', '.git');
+    await mkdir(target, { recursive: true });
+    await mkdir(linkedGitDir, { recursive: true });
+    await writeFile(join(target, '.git'), `gitdir: ${linkedGitDir}\n`);
+    await writeAliasSettings(aliasHome, 'my-agent', agentDir, target);
+    const plan = await planRun({ dir: 'my-agent' }, { ...deps, home: aliasHome });
+    expect(plan.cwd).toBe(target);
+    const profile = JSON.parse(plan.profile?.content ?? '{}') as { filesystem: { allow: string[] } };
+    expect(profile.filesystem.allow).toContain(target);
+    expect(profile.filesystem.allow).toContain(linkedGitDir);
+    expect(profile.filesystem.allow).not.toContain('/work');
+  });
+
+  it('should use the alias cwd for sbx mounts and exec', async () => {
+    const aliasHome = join(root, 'home');
+    const target = join(root, 'project');
+    await mkdir(target);
+    await writeAliasSettings(aliasHome, 'my-agent', agentDir, target);
+    const plan = await planRun(
+      { dir: 'my-agent', sandboxBackend: 'sbx' },
+      { ...deps, home: aliasHome, which: createWhichStub({ pi: '/shims/pi', sbx: '/shims/sbx' }) }
+    );
+    expect(plan.cwd).toBe(target);
+    expect(plan.sbx?.spec.cwd).toBe(target);
+    expect(plan.sbx?.spec.mounts).toContainEqual({ path: target, readonly: false });
+  });
+
+  it('should reject a missing or non-directory alias cwd before composing a run', async () => {
+    const aliasHome = join(root, 'home');
+    const missing = join(root, 'missing');
+    await writeAliasSettings(aliasHome, 'my-agent', agentDir, missing);
+    await expect(planRun({ dir: 'my-agent' }, { ...deps, home: aliasHome })).rejects.toThrow(
+      `Alias "my-agent" cwd is not a directory: ${missing}`
+    );
+    const file = join(root, 'file');
+    await writeFile(file, 'not a directory');
+    await writeAliasSettings(aliasHome, 'my-agent', agentDir, file);
+    await expect(planRun({ dir: 'my-agent' }, { ...deps, home: aliasHome })).rejects.toThrow(
+      `Alias "my-agent" cwd is not a directory: ${file}`
+    );
+  });
+
+  it('should let a schedule cwd override the alias cwd', async () => {
+    const aliasHome = join(root, 'home');
+    const target = join(root, 'project');
+    await writeAliasSettings(aliasHome, 'my-agent', agentDir, target);
+    const scheduleCwd = join(root, 'scheduled-project');
+    expect(await exists(target)).toBe(false);
+    await mkdir(scheduleCwd);
+    await addFile('schedule/daily.md', `---\ncron: '0 9 * * *'\ncwd: ${scheduleCwd}\n---\nReport.\n`);
+    const plan = await planRun({ dir: 'my-agent', schedule: 'daily' }, { ...deps, home: aliasHome });
+    expect(plan.cwd).toBe(scheduleCwd);
+    const profile = JSON.parse(plan.profile?.content ?? '{}') as { filesystem: { allow: string[] } };
+    expect(profile.filesystem.allow).toContain(scheduleCwd);
+    expect(profile.filesystem.allow).not.toContain(target);
   });
 
   it('should surface the shadow warning in plan.warnings when a same-named cwd directory also exists', async () => {

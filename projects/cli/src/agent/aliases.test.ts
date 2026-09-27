@@ -38,6 +38,18 @@ describe('resolveAgentRef', () => {
     });
   });
 
+  it('should resolve an alias cwd independently of its agent path', async () => {
+    await writeSettings({
+      agents: { assist: { path: '~/agents/assist', cwd: '~/dev/project/' }, other: { path: '/a', cwd: '$HOME/work' } }
+    });
+    expect(await resolveAgentRef('assist', { home, cwd })).toEqual({
+      dir: join(home, 'agents', 'assist'),
+      cwd: join(home, 'dev', 'project'),
+      warnings: []
+    });
+    expect((await resolveAgentRef('other', { home, cwd })).cwd).toBe(join(home, 'work'));
+  });
+
   it('should expand ~ and $HOME in an alias path against home', async () => {
     await writeSettings({ agents: { 'my-agent': { path: '~/agents/my-agent' }, other: { path: '$HOME/x' } } });
     expect((await resolveAgentRef('my-agent', { home, cwd })).dir).toBe(join(home, 'agents', 'my-agent'));
@@ -98,6 +110,24 @@ describe('resolveAgentRef', () => {
     expect(result.warnings.join('\n')).toContain(
       `${settingsPath()}: agents.my-agent.path must be an absolute, ~/, or $HOME/ path — ignored: relative/path`
     );
+  });
+
+  it('should ignore invalid cwd without dropping a valid alias path', async () => {
+    for (const invalidCwd of ['relative/path', '', '   ', 3, null]) {
+      await writeSettings({ agents: { assist: { path: '/agents/assist', cwd: invalidCwd } } });
+      expect(await resolveAgentRef('assist', { home, cwd })).toEqual({
+        dir: '/agents/assist',
+        warnings: [`${settingsPath()}: agents.assist.cwd must be an absolute, ~/, or $HOME/ path — ignored`]
+      });
+    }
+  });
+
+  it('should warn on unknown alias fields without dropping a valid path', async () => {
+    await writeSettings({ agents: { assist: { path: '/agents/assist', cwwd: '/project' } } });
+    expect(await resolveAgentRef('assist', { home, cwd })).toEqual({
+      dir: '/agents/assist',
+      warnings: [`${settingsPath()}: agents.assist: unsupported keys ignored: cwwd`]
+    });
   });
 
   it('should warn on unknown top-level keys', async () => {

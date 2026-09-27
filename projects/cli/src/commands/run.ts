@@ -5,7 +5,7 @@
 // a fs-touching `materializeRun` so the CLI can print the plan on --dry-run
 // and tests can assert both halves in-process.
 
-import { exists, mkdir, rm, writeFile } from 'node:fs/promises';
+import { exists, mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
@@ -135,8 +135,8 @@ export interface RunPlan {
   /** The single argv source: `composeArgv(plan.launch)` — package-entry-free until `materializeRun` recomposes it with resolved package entries. */
   readonly launch: LaunchSpec;
   /**
-   * The effective working directory: `deps.cwd`, or `flags.schedule`'s
-   * `Schedule.cwd` when a schedule is running. Callers spawn here — `cli.ts`
+   * The effective working directory: the terminal cwd, a named alias's cwd,
+   * or `flags.schedule`'s `Schedule.cwd` (highest precedence). Callers spawn here — `cli.ts`
    * passes it to `runForeground` — since a scheduled run's launchd/systemd
    * invocation carries no shell `cd` of its own.
    */
@@ -155,9 +155,10 @@ export interface RunPlan {
 export async function planRun(flags: RunFlags, deps: RunDeps = {}): Promise<RunPlan> {
   const home = deps.home ?? homedir();
   const baseCwd = deps.cwd ?? process.cwd();
-  const { dir, warnings: refWarnings } = await resolveAgentRef(flags.dir, { home, cwd: baseCwd });
+  const { dir, cwd: aliasCwd, warnings: refWarnings } = await resolveAgentRef(flags.dir, { home, cwd: baseCwd });
   const folder = await loadAgentFolder(dir);
-  const scheduled = await resolveScheduledRun(flags, folder, home, baseCwd);
+  const scheduled = await resolveScheduledRun(flags, folder, home, aliasCwd ?? baseCwd);
+  if (aliasCwd !== undefined && flags.schedule === undefined) await assertAliasCwd(aliasCwd, flags.dir);
   const stateDir = stateDirFor(folder.dir, home);
   const { extensionsDir, sessionsDir, miseCacheDir } = statePaths(stateDir);
   const posture = resolvePosture(flags, folder);
@@ -198,8 +199,13 @@ export async function planRun(flags: RunFlags, deps: RunDeps = {}): Promise<RunP
   };
 }
 
+async function assertAliasCwd(cwd: string, name: string): Promise<void> {
+  if ((await exists(cwd)) && (await stat(cwd)).isDirectory()) return;
+  throw new Error(`Alias "${name}" cwd is not a directory: ${cwd}`);
+}
+
 interface ScheduledRunPlan {
-  /** `Schedule.cwd` when `--schedule` resolved one, `baseCwd` otherwise — the run's effective working directory. */
+  /** `Schedule.cwd` when `--schedule` resolved one, the alias cwd or terminal cwd otherwise. */
   readonly cwd: string;
   /** `flags.passthrough` as-is, or with the schedule's headless invocation appended. */
   readonly passthrough: readonly string[];

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it, expect } from 'bun:test';
-import { chmod, exists, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, exists, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -86,17 +86,42 @@ describe('run command', () => {
     expect(exitCode).toBe(0);
   });
 
-  it('resolves a bare alias name via ~/.cradle/settings.json (HOME override), skipping bin checks on --dry-run', async () => {
+  it('resolves a bare alias name and previews its cwd without needing bins', async () => {
+    const projectDir = join(root, 'project');
+    await mkdir(projectDir);
     await mkdir(join(root, '.cradle'), { recursive: true });
     await writeFile(
       join(root, '.cradle', 'settings.json'),
-      JSON.stringify({ agents: { hello: { path: agentDir } } }),
+      JSON.stringify({ agents: { hello: { path: agentDir, cwd: projectDir } } }),
       'utf8'
     );
     const { stdout, exitCode } = await runCli(['run', 'hello', '--dry-run'], { ...env, HOME: root });
+    expect(stdout).toContain(`cwd: ${projectDir}\n`);
     const command = stdout.trim().split('\n').at(-1) ?? '';
     expect(command).toContain(`--append-system-prompt ${join(agentDir, 'APPEND_SYSTEM.md')}`);
     expect(exitCode).toBe(0);
+  });
+
+  it('should spawn pi in the alias cwd only when the alias name is used', async () => {
+    const projectDir = join(root, 'project');
+    const fakeBin = join(root, 'bin');
+    await mkdir(projectDir);
+    await mkdir(fakeBin);
+    await mkdir(join(root, '.cradle'));
+    await writeFile(
+      join(root, '.cradle', 'settings.json'),
+      JSON.stringify({ agents: { hello: { path: agentDir, cwd: projectDir } } })
+    );
+    const fakePi = join(fakeBin, 'pi');
+    await writeFile(fakePi, '#!/bin/sh\npwd\n');
+    await chmod(fakePi, 0o755);
+    const runEnv = { ...env, HOME: root, PATH: `${fakeBin}:${process.env.PATH ?? ''}` };
+    const named = await runCli(['run', 'hello', '--no-sandbox'], runEnv);
+    expect(named.exitCode).toBe(0);
+    expect(named.stdout.trim()).toBe(await realpath(projectDir));
+    const explicit = await runCli(['run', agentDir, '--no-sandbox'], runEnv);
+    expect(explicit.exitCode).toBe(0);
+    expect(explicit.stdout.trim()).toBe(await realpath(PKG_ROOT));
   });
 
   it("omits --silent with --verbose to show nono's full capabilities banner", async () => {
