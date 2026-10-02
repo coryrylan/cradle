@@ -60,6 +60,6 @@
     "@11ty/eleventy-plugin-vite": "8.0.0",
     "@nvidia-elements/lint": "2.7.0",
     "eslint": "catalog:",
-    "markdown-it": "15.0.1"
+    "markdown-it": "15.0.2"
   }
 }
