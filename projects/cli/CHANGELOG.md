@@ -1,3 +1,9 @@
+## [1.6.0](https://github.com/coryrylan/cradle/compare/cradle-v1.5.0...cradle-v1.6.0) (2026-10-30)
+
+### Features
+
+* **cli:** enhance filesystem permissions and introduce terminal integrations ([e8fb2c3](https://github.com/coryrylan/cradle/commit/e8fb2c34680a92912a5f3116b7f3be62b79dbd0b))
+
 ## [1.5.0](https://github.com/coryrylan/cradle/compare/cradle-v1.4.1...cradle-v1.5.0) (2026-09-27)
 
 ### Features
