@@ -223,7 +223,7 @@
     "yargs": "^18.1.0"
   },
   "devDependencies": {
-    "@coryrylan/tools": "1.1.1",
+    "@coryrylan/tools": "1.2.0",
     "@eslint/js": "catalog:",
     "@eslint/json": "2.0.1",
     "@types/bun": "catalog:",
