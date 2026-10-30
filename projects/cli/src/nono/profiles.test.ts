@@ -18,7 +18,7 @@ function spec(overrides: Partial<ProfileSpec> = {}): ProfileSpec {
     cwd: '/work/project',
     agentDir: '/agents/helper',
     stateDir: '/home/u/.cradle/agents/helper-1a2b3c4d',
-    grants: { read: [], write: [], allow: [], unixSocketDirBind: [] },
+    grants: { read: [], write: [], allow: [], unixSocket: [], unixSocketDirBind: [] },
     rules: [],
     ...overrides
   };
@@ -111,6 +111,7 @@ describe('buildProfileJson', () => {
         read: ['~/data', '/etc/certs'],
         write: ['$HOME/out'],
         allow: ['~/scratch'],
+        unixSocket: [],
         unixSocketDirBind: ['~/.agent-browser']
       }
     });
@@ -122,6 +123,22 @@ describe('buildProfileJson', () => {
 
   it('omits Unix socket grants when the agent supplies none', () => {
     expect(build().filesystem.unix_socket_dir_bind).toBeUndefined();
+    expect(build().filesystem.unix_socket).toBeUndefined();
+  });
+
+  it('should expand and deduplicate declared connect-only sockets when merging host integration grants', () => {
+    const profile = build({
+      grants: { ...spec().grants, unixSocket: ['~/herdr.sock', '$HOME/herdr.sock', '/runtime/moshi.sock'] },
+      terminalSocketPaths: ['/home/u/herdr.sock', '/runtime/other.sock']
+    });
+    expect(profile.filesystem.unix_socket).toEqual([
+      '/home/u/herdr.sock',
+      '/runtime/moshi.sock',
+      '/runtime/other.sock'
+    ]);
+    expect(profile.filesystem.unix_socket_bind).toBeUndefined();
+    expect(profile.filesystem.unix_socket_dir_bind).toBeUndefined();
+    expect(profile.filesystem.allow).not.toContain('/runtime');
   });
 
   it('appends the agent’s seatbelt rules after the base rules (Seatbelt is last-match-wins)', () => {

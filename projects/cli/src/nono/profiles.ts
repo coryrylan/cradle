@@ -58,6 +58,10 @@ export interface ProfileSpec {
   readonly rules: readonly string[];
   /** Precedence-resolved network posture, emitted as the profile's `network` block. Absent ⇒ nono default (open). */
   readonly network?: AgentNetwork;
+  /** Active host terminal sockets, granted connect access without bind or directory writes. */
+  readonly terminalSocketPaths?: readonly string[];
+  /** Installed hook files, including custom Pi homes and symlink targets outside the default Pi grant. */
+  readonly terminalExtensionFiles?: readonly string[];
 }
 
 type BaseFilesystem = {
@@ -100,7 +104,12 @@ export function buildProfileJson(spec: ProfileSpec): string {
     meta: { ...cradlePiProfile.meta, name: `cradle-${basename(spec.stateDir)}` },
     filesystem: {
       ...baseFs,
-      read: [...(baseFs.read ?? []), spec.agentDir, ...spec.grants.read.map(expand)],
+      read: [
+        ...(baseFs.read ?? []),
+        spec.agentDir,
+        ...spec.grants.read.map(expand),
+        ...(spec.terminalExtensionFiles ?? [])
+      ],
       write: [...(baseFs.write ?? []), ...spec.grants.write.map(expand)],
       allow: [
         ...(baseFs.allow ?? []),
@@ -109,12 +118,23 @@ export function buildProfileJson(spec: ProfileSpec): string {
         ...(spec.linkedGitDir !== undefined ? [spec.linkedGitDir] : []),
         ...spec.grants.allow.map(expand)
       ],
-      ...(unixSocketDirBind.length > 0 ? { unix_socket_dir_bind: unixSocketDirBind } : {})
+      ...(unixSocketDirBind.length > 0 ? { unix_socket_dir_bind: unixSocketDirBind } : {}),
+      ...getUnixSocketGrants(spec)
     },
     unsafe_macos_seatbelt_rules: [...cradlePiProfile.unsafe_macos_seatbelt_rules, ...spec.rules],
     ...(network !== undefined ? { network } : {})
   };
   return JSON.stringify(profile, null, 2);
+}
+
+function getUnixSocketGrants(spec: ProfileSpec): { unix_socket?: readonly string[] } {
+  const sockets = [
+    ...new Set([
+      ...spec.grants.unixSocket.map(path => expandHome(path, spec.home)),
+      ...(spec.terminalSocketPaths ?? [])
+    ])
+  ];
+  return sockets.length > 0 ? { unix_socket: sockets } : {};
 }
 
 /** Map `AgentNetwork` (camelCase) to nono's canonical snake_case `network` block, dropping absent fields. */

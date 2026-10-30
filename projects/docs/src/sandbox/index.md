@@ -33,6 +33,23 @@ Declaring `sandbox/nono.json` runs the agent inside the [nono](https://github.co
 }
 ```
 
+### Unix sockets
+
+Use `filesystem.unix_socket` for connect-only access to individual socket files:
+
+```json
+{
+  "filesystem": {
+    "unix_socket": [
+      "~/.config/herdr/herdr.sock",
+      "~/Library/Application Support/Moshi/moshi-hook.sock"
+    ]
+  }
+}
+```
+
+Cradle expands `~` and `$HOME` and merges these paths with any automatically discovered host integration grants, removing duplicates. This grants no bind access or directory writes. `unix_socket_dir_bind` instead grants connect and bind access to direct-child sockets in a dedicated directory. Both keys are nono-only; sbx warns and ignores them because Unix sockets cannot cross its VM boundary.
+
 ### Network policy
 
 Outbound network is **open by default within a sandboxed run**. A `network` block tightens it — the keys mirror nono's canonical `network` profile fields, enforced by nono itself (a local CONNECT/credential proxy that Seatbelt forces all egress through on macOS):
@@ -112,7 +129,7 @@ The schema is a restricted subset of nono's: `sandbox: false` opts out identical
 }
 ```
 
-Keys `sandbox/nono.json` accepts that the VM boundary has no equivalent for — `unix_socket_dir_bind`, `network_profile`, `open_port`, `listen_port`, `unsafe_macos_seatbelt_rules` — are warned and dropped with a dedicated "nono-only" message rather than folded into the generic unsupported-key warning, so copying a working `nono.json` shows immediately which grants didn't survive the port. Everything else reuses nono's own field readers, so a malformed value fails the same way in both files.
+Keys `sandbox/nono.json` accepts that the VM boundary has no equivalent for — `unix_socket`, `unix_socket_dir_bind`, `network_profile`, `open_port`, `listen_port`, `unsafe_macos_seatbelt_rules` — are warned and dropped with a dedicated "nono-only" message rather than folded into the generic unsupported-key warning, so copying a working `nono.json` shows immediately which grants didn't survive the port. Everything else reuses nono's own field readers, so a malformed value fails the same way in both files.
 
 ### Run model
 

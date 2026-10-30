@@ -151,7 +151,7 @@ An agent runs inside the [nono](https://github.com/nolabs-ai/nono) sandbox when 
 }
 ```
 
-The `filesystem` block supports `read`, `write`, `allow`, and `unix_socket_dir_bind`. The socket grant permits connect and bind only for direct-child Unix socket paths; keep it scoped to a dedicated directory rather than a broad parent such as `~` or `/tmp`.
+The `filesystem` block supports `read`, `write`, `allow`, `unix_socket`, and `unix_socket_dir_bind`. `unix_socket` grants connect-only access to individual socket paths, with `~`/`$HOME` expanded and duplicate paths removed when merged with host integration grants. `unix_socket_dir_bind` permits connect and bind only for direct-child Unix socket paths; keep it scoped to a dedicated directory rather than a broad parent such as `~` or `/tmp`. Both socket keys are nono-only and warn-and-drop under sbx.
 
 Within a sandboxed run, network is **open by default**. The `network` block mirrors nono's canonical profile keys — `block` (deny all outbound), `allow_domain` (host allowlist; presence flips nono to default-deny), `open_port`/`listen_port` (localhost/listen TCP; `open_port: [0]` allows any outbound localhost port on macOS), `network_profile` (named nono policy) — and is folded into the generated profile, enforced by nono's proxy (verified on macOS Seatbelt). An `allow_domain` allowlist blocks localhost too, so a local-model agent must list `localhost` and its `open_port`. Precedence: `--offline` (full block) > `--allow-host <host>` (repeatable allowlist) > `sandbox/nono.json` `network` > open. nono **fails closed**: a malformed `network` key or an unenforceable platform makes the run refuse to start, so cradle never ships a do-nothing allowlist. `--offline`/`--allow-host` request a network policy, and a policy is only enforceable inside the sandbox, so either flag forces the sandbox ON (same as `--sandbox`) unless `--no-sandbox` is passed explicitly — in that case cradle warns `network policy has no effect without the sandbox — pi runs with no network isolation (--sandbox to enforce it)` and runs pi bare.
 
@@ -175,7 +175,7 @@ An agent that _still_ cannot run sandboxed can declare the opt-out in the same f
 
 Backend precedence, now that there are two sandbox files, is: `--no-sandbox` (off, unconditionally) > `--sandbox-backend <nono|sbx>` (forces that backend on) > bare `--sandbox` (forces on, using the folder's declared backend, defaulting to nono when neither file is present) > the folder's own declared posture (`sandbox/nono.json` and `sandbox/sbx.json` are independent sibling opt-ins — a folder shipping only one uses that one; a folder enabling both gets nono, with a warning naming `--sandbox-backend sbx` as the override — see [`sandbox/sbx.json`](#sandboxsbxjson) below) > restrictive network flags (`--offline`, `--allow-host`, which force nono on when neither file is configured) > unsandboxed default. A folder-driven opt-out is loud — cradle prints `warning: sandbox disabled by sandbox/nono.json …` (or `sandbox/sbx.json`) on every run — and a folder with neither file similarly warns that pi has no OS isolation (a `sandbox/` dir with neither file present warns at load too). `--sandbox` always forces isolation back on; its profile uses the folder's grants when present. Treat a third-party folder that ships `"sandbox": false` with exactly the scrutiny that warning implies: it runs pi with no OS isolation.
 
-Cradle doesn't keep a shared global nono profile. On each run it **generates a per-agent profile** into `~/.cradle/agents/<id>/nono-profile.json` — the embedded `cradle-pi` base (which `extends` nono's built-in `default`, pulls the `node_runtime`, `git_config`, and `unlink_protection` groups, and grants the mise/pi/gh/`say` paths every agent needs) merged with this run's grants: your cwd, the agent folder, the state dir, the `sandbox/nono.json` `read`/`write`/`allow`/`unix_socket_dir_bind` entries above (`~`/`$HOME` expanded), and any `unsafe_macos_seatbelt_rules` (appended after the base's). When the cwd is a linked git worktree or submodule checkout, the `.git` pointer file's resolved shared git dir is granted too — without it every sandboxed git command (and any project hook shelling out to git) fails with `fatal: not a git repository`, since the real git dir lives outside the cwd. Cradle then runs `nono run --silent --profile ~/.cradle/agents/<id>/nono-profile.json …` by default (silent mode suppresses nono's startup banner); `--verbose` drops `--silent` to show nono's capabilities banner, and cradle prints `🔒 Sandbox Active` on silent sandboxed runs. So an agent's entire sandbox posture is described by its own directory — nothing is stored globally, and each agent gets a distinct profile (no cross-agent collisions). The resolved `network` posture is baked into the profile's `network` block too (no `--block-net` flag). Grant `allow`/`read`/`write` paths tightly: nono refuses to start if a grant overlaps its own state root (`~/.local/state/nono`), so never grant `/Users` or `~/`.
+Cradle doesn't keep a shared global nono profile. On each run it **generates a per-agent profile** into `~/.cradle/agents/<id>/nono-profile.json` — the embedded `cradle-pi` base (which `extends` nono's built-in `default`, pulls the `node_runtime`, `git_config`, and `unlink_protection` groups, and grants the mise/pi/gh/`say` paths every agent needs) merged with this run's grants: your cwd, the agent folder, the state dir, the `sandbox/nono.json` `read`/`write`/`allow`/`unix_socket`/`unix_socket_dir_bind` entries above (`~`/`$HOME` expanded), and any `unsafe_macos_seatbelt_rules` (appended after the base's). When the cwd is a linked git worktree or submodule checkout, the `.git` pointer file's resolved shared git dir is granted too — without it every sandboxed git command (and any project hook shelling out to git) fails with `fatal: not a git repository`, since the real git dir lives outside the cwd. Cradle then runs `nono run --silent --profile ~/.cradle/agents/<id>/nono-profile.json …` by default (silent mode suppresses nono's startup banner); `--verbose` drops `--silent` to show nono's capabilities banner, and cradle prints `🔒 Sandbox Active` on silent sandboxed runs. So an agent's entire sandbox posture is described by its own directory — nothing is stored globally, and each agent gets a distinct profile (no cross-agent collisions). The resolved `network` posture is baked into the profile's `network` block too (no `--block-net` flag). Grant `allow`/`read`/`write` paths tightly: nono refuses to start if a grant overlaps its own state root (`~/.local/state/nono`), so never grant `/Users` or `~/`.
 
 ### `sandbox/sbx.json`
 
@@ -192,7 +192,7 @@ The second sandbox backend: an agent runs inside [Docker Sandboxes](https://docs
 }
 ```
 
-Keys `sandbox/nono.json` accepts that the VM boundary has no equivalent for — `unix_socket_dir_bind`, `network_profile`, `open_port`, `listen_port`, `unsafe_macos_seatbelt_rules` — warn-and-drop with a dedicated "nono-only" message (`readSbxSandbox` in `agent/folder.ts`) rather than folding into the generic unsupported-key warning, so an author copying a working `nono.json` learns immediately which grants didn't survive the port instead of losing them silently. Everything else reuses nono's own field readers, so a malformed value fails the same way in both files.
+Keys `sandbox/nono.json` accepts that the VM boundary has no equivalent for — `unix_socket`, `unix_socket_dir_bind`, `network_profile`, `open_port`, `listen_port`, `unsafe_macos_seatbelt_rules` — warn-and-drop with a dedicated "nono-only" message (`readSbxSandbox` in `agent/folder.ts`) rather than folding into the generic unsupported-key warning, so an author copying a working `nono.json` learns immediately which grants didn't survive the port instead of losing them silently. Everything else reuses nono's own field readers, so a malformed value fails the same way in both files.
 
 **How an sbx run works.** The guest mount list is fixed at sandbox-creation time: your cwd (rw — the target project), the agent folder (ro), the per-agent state dir (rw), and `~/.pi/agent` (rw). Mounting pi's own auth/settings store matters because the final exec step (below) overrides `HOME` inside the guest to point at it — a personal `pi login` on the host carries over unchanged, and any OAuth refresh the guest performs writes back to the same host files, so tokens never drift between the two environments. A linked git worktree or submodule checkout gets its real shared git dir mounted rw too (verified working in-guest) — without it, every sandboxed git command fails with `fatal: not a git repository`, the same failure nono's own grant avoids. `sandbox/sbx.json`'s own grants extend the list — `read` → ro, `write`/`allow` → rw — each expanded against `$HOME`. Host paths are preserved verbatim inside the guest, so the composed pi argv is identical on both backends; only the wrapper differs.
 
@@ -249,18 +249,18 @@ Two cron expressions are rejected rather than silently mistranslated: one constr
 
 Cradle translates the folder into explicit pi flags — never into files inside `~/.pi/agent`:
 
-| Agent folder                      | pi mechanism                                                       |
-| --------------------------------- | ------------------------------------------------------------------ |
-| `SYSTEM.md`                       | `--system-prompt <path>` (replaces pi's default prompt)            |
-| `APPEND_SYSTEM.md`                | `--append-system-prompt <path>` (appends to it)                    |
-| `settings.json` model keys        | `--provider` / `--model` / `--thinking`                            |
-| `models.json`                     | generated `-e` extension → `pi.registerProvider(…)`                |
-| `settings.json` `packages`        | per-agent npm install → each package's selected extensions as `-e` |
-| `skills/`                         | `--skill <dir>`                                                    |
-| `extensions/`                     | `-e <file>` per extension, verbatim, loaded last                   |
-| `schedule/<task>.md`              | `--print --name <label> --no-approve -- <prompt>`, from its `cwd`  |
-| session history                   | `--session-dir ~/.cradle/agents/<id>/sessions`                     |
-| isolation from personal pi config | `--no-extensions --no-skills --no-prompt-templates`                |
+| Agent folder                      | pi mechanism                                                                              |
+| --------------------------------- | ----------------------------------------------------------------------------------------- |
+| `SYSTEM.md`                       | `--system-prompt <path>` (replaces pi's default prompt)                                   |
+| `APPEND_SYSTEM.md`                | `--append-system-prompt <path>` (appends to it)                                           |
+| `settings.json` model keys        | `--provider` / `--model` / `--thinking`                                                   |
+| `models.json`                     | generated `-e` extension → `pi.registerProvider(…)`                                       |
+| `settings.json` `packages`        | per-agent npm install → each package's selected extensions as `-e`                        |
+| `skills/`                         | `--skill <dir>`                                                                           |
+| `extensions/`                     | `-e <file>` per extension, verbatim, loaded last                                          |
+| `schedule/<task>.md`              | `--print --name <label> --no-approve -- <prompt>`, from its `cwd`                         |
+| session history                   | `--session-dir ~/.cradle/agents/<id>/sessions`                                            |
+| isolation from personal pi config | `--no-extensions --no-skills --no-prompt-templates` (host terminal hooks load explicitly) |
 
 Generated extensions land in `~/.cradle/agents/<id>/extensions/` (regenerated every run) with the agent folder's absolute paths baked in as constants.
 
@@ -274,7 +274,28 @@ Consequences, accepted for v1:
 - `--no-extensions` also disables the _personal_ `~/.pi/agent/settings.json`'s own `packages` inside agent runs — those never load, intentional isolation. This is distinct from an agent folder's own `settings.json` `packages`, which cradle resolves and installs itself (see [`settings.json`](#settingsjson) above) and loads via explicit `-e` flags, since explicit `-e` paths load even under `--no-extensions`.
 - Project context files (`AGENTS.md`/`AGENTS.md` in your cwd) still load; that's the target project's context and it's desirable.
 
-One env var breaks the argv-only rule on purpose: sandboxed runs export `MISE_CACHE_DIR=~/.cradle/agents/<id>/mise-cache`. The generated per-agent profile deliberately denies the shared `~/Library/Caches/mise` — a poisoned `bin_paths` cache written there would redirect which binaries the user's later, unsandboxed mise execs resolve to, invisibly and machine-globally. Without an override, every sandboxed `mise exec` (which pi/nono resolution can trigger via mise shims) fails to write that cache and spams `mise WARN failed to write cache file`. Pointing `MISE_CACHE_DIR` at a private cache inside the already-granted state dir instead gives mise a location it can write to — warnings gone, cache works — without ever exposing the shared host cache to a sandboxed process. mise creates the directory itself; cradle never pre-creates or wipes it. This doesn't undermine the argv rationale above: it configures mise, not pi, and pi's own configuration stays entirely on argv. The failure mode if this env var were ever stripped is benign — mise falls back to the shared cache and the warnings return, nothing breaks.
+The mise env override breaks the argv-only rule on purpose: sandboxed runs export `MISE_CACHE_DIR=~/.cradle/agents/<id>/mise-cache`. The generated per-agent profile deliberately denies the shared `~/Library/Caches/mise` — a poisoned `bin_paths` cache written there would redirect which binaries the user's later, unsandboxed mise execs resolve to, invisibly and machine-globally. Without an override, every sandboxed `mise exec` (which pi/nono resolution can trigger via mise shims) fails to write that cache and spams `mise WARN failed to write cache file`. Pointing `MISE_CACHE_DIR` at a private cache inside the already-granted state dir instead gives mise a location it can write to — warnings gone, cache works — without ever exposing the shared host cache to a sandboxed process. mise creates the directory itself; cradle never pre-creates or wipes it. This doesn't undermine the argv rationale above: it configures mise, not pi, and pi's own configuration stays entirely on argv. The failure mode if this env var were ever stripped is benign — mise falls back to the shared cache and the warnings return, nothing breaks.
+
+## Host terminal integrations
+
+Herdr and Moshi are host integrations rather than agent capabilities. For
+non-scheduled host runs, cradle discovers only their installed Pi entry files:
+`herdr-agent-state.ts` and `moshi-hooks.ts` in the personal Pi `extensions/`
+directory (`PI_CODING_AGENT_DIR` overrides `~/.pi/agent`). An integration loads
+through explicit `-e` only when its daemon socket exists. Herdr also requires
+its pane environment. Other personal extensions remain excluded.
+
+The generated nono profile grants connect access to those exact Unix socket
+files via `filesystem.unix_socket`, without directory writes or bind access.
+Custom socket locations follow `HERDR_SOCKET_PATH`, `MOSHI_SOCKET_PATH`, and
+Moshi's platform defaults. Missing hooks or daemons are skipped. Installed hook
+files receive individual read grants, including custom Pi homes and symlink targets.
+The host wrapper receives `HERDR_AGENT=pi` inside Herdr so foreground detection
+can identify Pi behind nono or sbx. This configures the terminal, not Pi.
+
+The sbx microVM receives no host hook paths or socket grants; only the
+host-visible detection hint applies. Native hook reporting is supported on
+macOS and Linux, with no host-socket forwarding into the VM.
 
 ## Order of support
 

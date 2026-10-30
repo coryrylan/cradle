@@ -83,6 +83,26 @@ cradle schedule remove ./my-agent          # unload + delete
 
 The agent runs in _your_ working directory unless a named alias sets a default `cwd`; the agent folder is a parameter (default `.`). Everything after `--` is forwarded verbatim to pi. `--dry-run` prints the generated-extension write plan and the composed command without spawning (and without requiring the bins to be installed). Per-agent state (generated extensions + session history) lives under `~/.cradle/agents/<name>-<hash>/`.
 
+### Herdr and Moshi
+
+Run `cradle run assist` normally inside Herdr. On macOS and Linux, cradle automatically loads the installed `herdr-agent-state.ts` and `moshi-hooks.ts` Pi integrations when their daemon sockets exist. The hooks come from `~/.pi/agent/extensions/` (or `PI_CODING_AGENT_DIR/extensions/`); unrelated personal extensions stay disabled. Install Herdr's hook with `herdr integration install pi`, and install Moshi's Pi hook through your existing moshi-hook setup.
+
+Nono runs automatically receive connect-only grants for the exact active socket files. No socket-directory write or bind access is added. Cradle also identifies the host wrapper to Herdr as Pi, including when nono hides Pi in another process group. `--dry-run` shows the loaded hooks and the `HERDR_AGENT=pi` wrapper hint; the generated `nono-profile.json` records socket grants.
+
+Scheduled runs do not load these host integrations. The sbx microVM receives only the host wrapper hint; host hooks and sockets are not forwarded into the VM.
+
+You can also declare individual connect-only socket grants in an agent's `sandbox/nono.json`:
+
+```json
+{
+  "filesystem": {
+    "unix_socket": ["~/.config/herdr/herdr.sock", "~/Library/Application Support/Moshi/moshi-hook.sock"]
+  }
+}
+```
+
+Cradle expands `~`/`$HOME` and deduplicates these paths when merging host integration grants. This adds no bind access or directory writes. `unix_socket` is nono-only; sbx warns and ignores it.
+
 ### Scheduled runs (`schedule/`)
 
 An agent folder can carry a `schedule/` directory; each `schedule/<task>.md` is one cron-driven run — YAML frontmatter (`cron`, `cwd`, optional `name`/`description`) plus a markdown body that becomes the prompt.
@@ -185,7 +205,7 @@ An agent that still cannot run sandboxed can declare `{ "sandbox": false }` in e
 
 ### Docker Sandboxes backend (`sandbox/sbx.json`)
 
-A folder can opt into the [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (`sbx`) microVM instead of (or alongside) nono by declaring `sandbox/sbx.json` — a sibling file with a restricted subset of `sandbox/nono.json`'s schema: `sandbox: false` to opt out, `filesystem` `read`/`write`/`allow` only, `network` `block`/`allow_domain` only. Keys with no VM-boundary equivalent — `unix_socket_dir_bind`, `network_profile`, `open_port`, `listen_port`, `unsafe_macos_seatbelt_rules` — are warned and dropped rather than silently accepted. Force it explicitly with `--sandbox-backend sbx`; see [ARCHITECTURE.md](../../ARCHITECTURE.md#sandboxsbxjson) for the full schema, backend precedence, and run model.
+A folder can opt into the [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (`sbx`) microVM instead of (or alongside) nono by declaring `sandbox/sbx.json` — a sibling file with a restricted subset of `sandbox/nono.json`'s schema: `sandbox: false` to opt out, `filesystem` `read`/`write`/`allow` only, `network` `block`/`allow_domain` only. Keys with no VM-boundary equivalent — `unix_socket`, `unix_socket_dir_bind`, `network_profile`, `open_port`, `listen_port`, `unsafe_macos_seatbelt_rules` — are warned and dropped rather than silently accepted. Force it explicitly with `--sandbox-backend sbx`; see [ARCHITECTURE.md](../../ARCHITECTURE.md#sandboxsbxjson) for the full schema, backend precedence, and run model.
 
 ```json
 {

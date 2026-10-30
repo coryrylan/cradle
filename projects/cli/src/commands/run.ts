@@ -20,6 +20,7 @@ import { composeArgv, type LaunchSpec } from '../agent/launch.js';
 import { emitPackagesManifest, resolvePackageEntries, type NpmPackageSpec } from '../agent/packages.js';
 import { loadSchedules, missingScheduleDirError, type Schedule } from '../agent/schedules.js';
 import { stateDirFor, statePaths } from '../agent/state.js';
+import { getTerminalIntegrations, type TerminalIntegrations } from '../agent/terminal-integrations.js';
 import { resolveLinkedGitDir } from '../nono/linked-git-dir.js';
 import { AGENT_PROFILE_FILE, buildProfileJson, findDegenerateSandboxCwd } from '../nono/profiles.js';
 import {
@@ -71,6 +72,9 @@ interface RunDeps {
   readonly which?: WhichFn;
   /** Whether stdout is a TTY (`cli.ts` passes `process.stdout.isTTY`) — rides the sbx exec argv as `-t`; default false. */
   readonly tty?: boolean;
+  /** Host terminal discovery environment; defaults to the inherited process environment. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
+  readonly platform?: NodeJS.Platform;
 }
 
 /**
@@ -164,7 +168,9 @@ export async function planRun(flags: RunFlags, deps: RunDeps = {}): Promise<RunP
   const posture = resolvePosture(flags, folder);
   const dryRun = flags.dryRun ?? false;
   const bins = resolveBins(posture.backend, dryRun, deps.which);
-  const launch = buildLaunch({
+  const launch = await buildLaunch({
+    home,
+    deps,
     folder,
     flags,
     passthrough: scheduled.passthrough,
@@ -180,6 +186,7 @@ export async function planRun(flags: RunFlags, deps: RunDeps = {}): Promise<RunP
     cwd: scheduled.cwd,
     stateDir,
     profilePath: launch.profilePath,
+    terminalIntegrations: launch.terminalIntegrations,
     sbxBin: bins.sbxBin,
     hostPiBin: bins.piBin,
     tty: deps.tty ?? false
@@ -267,6 +274,8 @@ function unknownScheduleMessage(slug: string, schedules: readonly Schedule[]): s
 }
 
 interface LaunchContext {
+  readonly home: string;
+  readonly deps: RunDeps;
   readonly folder: AgentFolder;
   readonly flags: RunFlags;
   /** The resolved passthrough — `flags.passthrough` plain, or with a `--schedule` invocation appended (see `resolveScheduledRun`). */
@@ -279,10 +288,21 @@ interface LaunchContext {
   readonly miseCacheDir: string;
 }
 
+interface PlannedLaunch extends LaunchSpec {
+  readonly terminalIntegrations: TerminalIntegrations;
+}
+
 /** Resolve the generated-extension paths and profile path into the `LaunchSpec` `composeArgv` consumes. */
-function buildLaunch(ctx: LaunchContext): LaunchSpec {
+async function buildLaunch(ctx: LaunchContext): Promise<PlannedLaunch> {
   const { folder, flags, passthrough, backend, bins, stateDir, extensionsDir, sessionsDir, miseCacheDir } = ctx;
   return {
+    terminalIntegrations: await getTerminalIntegrations({
+      home: ctx.home,
+      env: ctx.deps.env ?? process.env,
+      platform: ctx.deps.platform ?? process.platform,
+      backend,
+      enabled: flags.schedule === undefined
+    }),
     folder,
     stateDir,
     extensionsDir,
@@ -616,6 +636,7 @@ interface IsolationContext {
   readonly sbxBin: string;
   readonly hostPiBin: string;
   readonly tty: boolean;
+  readonly terminalIntegrations: TerminalIntegrations;
 }
 
 interface IsolationPlan {
@@ -643,6 +664,7 @@ async function buildIsolation(
     cwd: ctx.cwd,
     stateDir: ctx.stateDir,
     profilePath: ctx.profilePath,
+    terminalIntegrations: ctx.terminalIntegrations,
     ...(linkedGitDir !== undefined ? { linkedGitDir } : {})
   });
   if (posture.backend !== 'sbx') return { profile, sbx: null, warnings: [] };
@@ -714,7 +736,14 @@ function sandboxPlan(
   sandbox: boolean,
   folder: AgentFolder,
   network: AgentNetwork | undefined,
-  ctx: { home: string; cwd: string; stateDir: string; profilePath: string; linkedGitDir?: string }
+  ctx: {
+    home: string;
+    cwd: string;
+    stateDir: string;
+    profilePath: string;
+    linkedGitDir?: string;
+    terminalIntegrations: TerminalIntegrations;
+  }
 ): { path: string; content: string } | null {
   if (!sandbox) return null;
   const degenerateCwd = findDegenerateSandboxCwd(ctx.cwd, ctx.home);
@@ -732,6 +761,8 @@ function sandboxPlan(
     stateDir: ctx.stateDir,
     grants: folder.sandbox.filesystem,
     rules: folder.sandbox.unsafeMacosSeatbeltRules,
+    terminalSocketPaths: ctx.terminalIntegrations.socketPaths,
+    terminalExtensionFiles: ctx.terminalIntegrations.extensionFiles,
     ...(network !== undefined ? { network } : {}),
     ...(ctx.linkedGitDir !== undefined ? { linkedGitDir: ctx.linkedGitDir } : {})
   });

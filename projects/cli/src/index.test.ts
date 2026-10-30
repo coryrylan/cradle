@@ -55,7 +55,7 @@ describe('run command', () => {
     const command = lines.at(-1) ?? '';
     // The wrapper points nono at the generated per-agent profile; grants live inside it, not as flags.
     // --silent suppresses nono's startup banner by default. The dry-run print
-    // discloses the spawn env too — cradle's one env-var exception (see
+    // discloses the host environment overrides too (see
     // `agent/launch.ts`'s `composeEnv`) — as a leading shell-assignment.
     expect(command.startsWith('MISE_CACHE_DIR=')).toBe(true);
     expect(command).toContain('/mise-cache nono run --silent --profile ');

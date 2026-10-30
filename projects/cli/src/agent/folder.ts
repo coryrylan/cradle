@@ -40,6 +40,8 @@ export interface AgentSandboxGrants {
   readonly read: readonly string[];
   readonly write: readonly string[];
   readonly allow: readonly string[];
+  /** Individual Unix socket paths the process may connect to, without bind access. */
+  readonly unixSocket: readonly string[];
   /** Direct-child Unix socket paths the process may connect to and bind. */
   readonly unixSocketDirBind: readonly string[];
 }
@@ -144,7 +146,7 @@ const KNOWN_ENTRIES = new Set([
   'sandbox'
 ]);
 const REPO_ENTRIES = new Set(['.git', '.gitignore', '.DS_Store', 'README.md', 'LICENSE']);
-const EMPTY_GRANTS: AgentSandboxGrants = { read: [], write: [], allow: [], unixSocketDirBind: [] };
+const EMPTY_GRANTS: AgentSandboxGrants = { read: [], write: [], allow: [], unixSocket: [], unixSocketDirBind: [] };
 const EMPTY_SANDBOX: AgentSandbox = {
   posture: 'unconfigured',
   filesystem: EMPTY_GRANTS,
@@ -455,7 +457,7 @@ function readNonoSandbox(json: { readonly [key: string]: JsonValue }, path: stri
 /**
  * Read `sandbox/sbx.json`: a restricted subset of nono.json's schema for the
  * sbx microVM backend. Keys with no VM-boundary equivalent
- * (`unix_socket_dir_bind`, `network_profile`, `open_port`, `listen_port`,
+ * (`unix_socket`, `unix_socket_dir_bind`, `network_profile`, `open_port`, `listen_port`,
  * `unsafe_macos_seatbelt_rules`) are warned-and-dropped with a dedicated
  * "nono-only" message rather than folded into the generic unsupported-key
  * warning, so an author copying a nono.json profile learns immediately which
@@ -511,15 +513,23 @@ function readSbxGrants(value: JsonValue | undefined, path: string, warnings: str
     warnings.push(`${path}: filesystem must be an object — ignored`);
     return EMPTY_GRANTS;
   }
-  warnNonoOnlyKey(
-    { record: value, key: 'unix_socket_dir_bind', path, explanation: 'Unix sockets cannot cross the sbx VM boundary' },
+  ['unix_socket', 'unix_socket_dir_bind'].forEach(key => {
+    warnNonoOnlyKey(
+      { record: value, key, path, explanation: 'Unix sockets cannot cross the sbx VM boundary' },
+      warnings
+    );
+  });
+  warnUnsupportedKeys(
+    value,
+    `${path} filesystem`,
+    ['read', 'write', 'allow', 'unix_socket', 'unix_socket_dir_bind'],
     warnings
   );
-  warnUnsupportedKeys(value, `${path} filesystem`, ['read', 'write', 'allow', 'unix_socket_dir_bind'], warnings);
   return {
     read: readStringList(value, 'read', path, warnings),
     write: readStringList(value, 'write', path, warnings),
     allow: readStringList(value, 'allow', path, warnings),
+    unixSocket: [],
     unixSocketDirBind: []
   };
 }
@@ -700,11 +710,17 @@ function readGrants(value: JsonValue | undefined, path: string, warnings: string
     warnings.push(`${path}: filesystem must be an object — ignored`);
     return EMPTY_GRANTS;
   }
-  warnUnsupportedKeys(value, `${path} filesystem`, ['read', 'write', 'allow', 'unix_socket_dir_bind'], warnings);
+  warnUnsupportedKeys(
+    value,
+    `${path} filesystem`,
+    ['read', 'write', 'allow', 'unix_socket', 'unix_socket_dir_bind'],
+    warnings
+  );
   return {
     read: readStringList(value, 'read', path, warnings),
     write: readStringList(value, 'write', path, warnings),
     allow: readStringList(value, 'allow', path, warnings),
+    unixSocket: readStringList(value, 'unix_socket', path, warnings),
     unixSocketDirBind: readStringList(value, 'unix_socket_dir_bind', path, warnings)
   };
 }

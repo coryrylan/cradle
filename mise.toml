@@ -2,8 +2,8 @@
 lockfile = true
 
 [tools]
-bun = "1.4.2"
-node = "26.8.2"
+bun = "1.4.4"
+node = "26.13.0"
 
 [tasks.clean]
 run = [
