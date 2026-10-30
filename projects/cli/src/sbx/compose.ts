@@ -199,11 +199,16 @@ export function sbxNetworkWarnings(network: AgentNetwork | undefined): string[] 
   );
 }
 
-/** Warn-and-drop disclosure for the one `AgentSandboxGrants` field sbx cannot honor: Unix sockets cannot cross the VM boundary. */
+/** Warn-and-drop disclosure for Unix socket grants, which cannot cross the sbx VM boundary. */
 export function sbxGrantWarnings(grants: AgentSandboxGrants): string[] {
-  return grants.unixSocketDirBind.length > 0
-    ? ['unix_socket_dir_bind is nono-only — Unix sockets cannot cross the sbx VM boundary; grant ignored']
-    : [];
+  return [
+    ...(grants.unixSocket.length > 0
+      ? ['unix_socket is nono-only — Unix sockets cannot cross the sbx VM boundary; grant ignored']
+      : []),
+    ...(grants.unixSocketDirBind.length > 0
+      ? ['unix_socket_dir_bind is nono-only — Unix sockets cannot cross the sbx VM boundary; grant ignored']
+      : [])
+  ];
 }
 
 /**

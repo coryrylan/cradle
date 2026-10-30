@@ -36,6 +36,14 @@ Everything after `--` is forwarded verbatim to `pi`. Use it for `pi`'s own flags
 
 Per-agent runtime state — generated extensions and session history — lives under `~/.cradle/agents/<name>-<hash>/`, outside the agent folder itself. That keeps the folder clean and committable: nothing a run writes ends up in your agent's source tree.
 
+## Herdr and Moshi
+
+On macOS and Linux, `cradle run` automatically loads your installed Herdr and Moshi Pi hooks when their daemon sockets exist. Run agents normally inside Herdr; no per-agent extension copies or extra `-e` arguments are required. Other personal Pi extensions remain disabled.
+
+Cradle reads `herdr-agent-state.ts` and `moshi-hooks.ts` from `~/.pi/agent/extensions/` (`PI_CODING_AGENT_DIR` overrides the Pi directory). Herdr requires its pane environment and `HERDR_SOCKET_PATH`; Moshi follows `MOSHI_SOCKET_PATH` or its platform socket location. Install Herdr's Pi integration with `herdr integration install pi`, and install Moshi's Pi hook through moshi-hook.
+
+Nono receives connect-only access to the exact socket files. The generated profile records those grants, and `--dry-run` shows the loaded hooks and Herdr detection hint. Scheduled runs exclude these integrations. With sbx, only the host wrapper identification applies; host hooks and sockets do not cross the microVM boundary.
+
 ## Flags
 
 | Flag                            | Effect                                                                                                                                                                                                      |

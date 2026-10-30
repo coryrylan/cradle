@@ -15,12 +15,12 @@ function createFolder(overrides: Partial<AgentFolder> = {}): AgentFolder {
     extensionFiles: [],
     sandbox: {
       posture: 'enabled',
-      filesystem: { read: [], write: [], allow: [], unixSocketDirBind: [] },
+      filesystem: { read: [], write: [], allow: [], unixSocket: [], unixSocketDirBind: [] },
       unsafeMacosSeatbeltRules: []
     },
     sbx: {
       posture: 'unconfigured',
-      filesystem: { read: [], write: [], allow: [], unixSocketDirBind: [] },
+      filesystem: { read: [], write: [], allow: [], unixSocket: [], unixSocketDirBind: [] },
       unsafeMacosSeatbeltRules: []
     },
     warnings: [],

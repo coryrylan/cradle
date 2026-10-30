@@ -224,7 +224,7 @@ function printDryRun(plan: RunPlan): void {
   if (plan.packages !== null) printPackagesPlan(plan.packages);
   console.log(`cwd: ${plan.cwd}`);
   // The dry-run print is an audit surface, so it must disclose the spawn env
-  // too (cradle's one env-var exception, see `agent/launch.ts`'s `composeEnv`)
+  // too (host mise and terminal overrides, see `agent/launch.ts`'s `composeEnv`)
   // — not just the argv.
   const envPrefix = Object.entries(composeEnv(plan.launch)).map(([key, value]) => `${key}=${quoteCommandPart(value)}`);
   const argv =

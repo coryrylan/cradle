@@ -17,7 +17,7 @@ import {
   type SbxSpec
 } from './compose.js';
 
-const EMPTY_GRANTS = { read: [], write: [], allow: [], unixSocketDirBind: [] };
+const EMPTY_GRANTS = { read: [], write: [], allow: [], unixSocket: [], unixSocketDirBind: [] };
 
 function mountContext(overrides: Partial<SbxMountContext> = {}): SbxMountContext {
   return {
@@ -83,7 +83,7 @@ describe('composeSbxMounts', () => {
   it('should append grants after the fixed base mounts: read ro, write and allow rw', () => {
     const mounts = composeSbxMounts(
       mountContext({
-        grants: { read: ['/etc/certs'], write: ['/scratch'], allow: ['/data'], unixSocketDirBind: [] }
+        grants: { read: ['/etc/certs'], write: ['/scratch'], allow: ['/data'], unixSocket: [], unixSocketDirBind: [] }
       })
     );
     expect(mounts.slice(-3)).toEqual([
@@ -96,7 +96,7 @@ describe('composeSbxMounts', () => {
   it('should expand ~ and $HOME in grant paths against home', () => {
     const mounts = composeSbxMounts(
       mountContext({
-        grants: { read: ['~/data'], write: ['$HOME/out'], allow: [], unixSocketDirBind: [] }
+        grants: { read: ['~/data'], write: ['$HOME/out'], allow: [], unixSocket: [], unixSocketDirBind: [] }
       })
     );
     expect(mounts).toEqual(
@@ -109,7 +109,9 @@ describe('composeSbxMounts', () => {
 
   it('should ignore unixSocketDirBind grants (covered by sbxGrantWarnings instead)', () => {
     const mounts = composeSbxMounts(
-      mountContext({ grants: { read: [], write: [], allow: [], unixSocketDirBind: ['~/.agent-browser'] } })
+      mountContext({
+        grants: { read: [], write: [], allow: [], unixSocket: [], unixSocketDirBind: ['~/.agent-browser'] }
+      })
     );
     expect(mounts.some(mount => mount.path.includes('.agent-browser'))).toBe(false);
   });
@@ -118,7 +120,13 @@ describe('composeSbxMounts', () => {
     const mounts = composeSbxMounts(
       mountContext({
         agentDir: '/agents/helper',
-        grants: { read: ['/agents/helper'], write: [], allow: ['/agents/helper'], unixSocketDirBind: [] }
+        grants: {
+          read: ['/agents/helper'],
+          write: [],
+          allow: ['/agents/helper'],
+          unixSocket: [],
+          unixSocketDirBind: []
+        }
       })
     );
     const occurrences = mounts.filter(mount => mount.path === '/agents/helper');
@@ -129,7 +137,9 @@ describe('composeSbxMounts', () => {
 
   it('should keep a path read-only when every occurrence is read-only', () => {
     const mounts = composeSbxMounts(
-      mountContext({ grants: { read: ['/agents/helper'], write: [], allow: [], unixSocketDirBind: [] } })
+      mountContext({
+        grants: { read: ['/agents/helper'], write: [], allow: [], unixSocket: [], unixSocketDirBind: [] }
+      })
     );
     expect(mounts.filter(mount => mount.path === '/agents/helper')).toEqual([
       { path: '/agents/helper', readonly: true }
@@ -305,8 +315,14 @@ describe('sbxGrantWarnings', () => {
   });
 
   it('should warn when unixSocketDirBind is non-empty', () => {
-    expect(sbxGrantWarnings({ read: [], write: [], allow: [], unixSocketDirBind: ['~/.agent-browser'] })).toEqual([
-      'unix_socket_dir_bind is nono-only — Unix sockets cannot cross the sbx VM boundary; grant ignored'
+    expect(
+      sbxGrantWarnings({ read: [], write: [], allow: [], unixSocket: [], unixSocketDirBind: ['~/.agent-browser'] })
+    ).toEqual(['unix_socket_dir_bind is nono-only — Unix sockets cannot cross the sbx VM boundary; grant ignored']);
+  });
+
+  it('should warn when unixSocket is non-empty', () => {
+    expect(sbxGrantWarnings({ ...EMPTY_GRANTS, unixSocket: ['/tmp/herdr.sock'] })).toEqual([
+      'unix_socket is nono-only — Unix sockets cannot cross the sbx VM boundary; grant ignored'
     ]);
   });
 });

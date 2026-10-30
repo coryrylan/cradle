@@ -7,7 +7,7 @@ import { loadAgentFolder, type AgentSandbox, type ThinkingLevel } from './folder
 
 const EMPTY_SANDBOX: AgentSandbox = {
   posture: 'unconfigured',
-  filesystem: { read: [], write: [], allow: [], unixSocketDirBind: [] },
+  filesystem: { read: [], write: [], allow: [], unixSocket: [], unixSocketDirBind: [] },
   unsafeMacosSeatbeltRules: []
 };
 
@@ -75,7 +75,7 @@ describe('loadAgentFolder', () => {
     expect(folder.sandbox).toEqual({
       posture: 'enabled',
       network: { block: true },
-      filesystem: { read: ['~/data'], write: [], allow: [], unixSocketDirBind: [] },
+      filesystem: { read: ['~/data'], write: [], allow: [], unixSocket: [], unixSocketDirBind: [] },
       unsafeMacosSeatbeltRules: []
     });
     expect(folder.warnings).toEqual([]);
@@ -545,6 +545,7 @@ describe('loadAgentFolder', () => {
             read: ['~/data', '/etc/certs'],
             write: ['$HOME/out'],
             allow: ['~/scratch', '/opt/cache'],
+            unix_socket: ['~/.config/herdr/herdr.sock', '$HOME/moshi.sock', '/tmp/custom.sock'],
             unix_socket_dir_bind: ['~/.agent-browser']
           }
         })
@@ -554,6 +555,7 @@ describe('loadAgentFolder', () => {
         read: ['~/data', '/etc/certs'],
         write: ['$HOME/out'],
         allow: ['~/scratch', '/opt/cache'],
+        unixSocket: ['~/.config/herdr/herdr.sock', '$HOME/moshi.sock', '/tmp/custom.sock'],
         unixSocketDirBind: ['~/.agent-browser']
       });
       expect(warningsText(folder)).not.toContain('filesystem');
@@ -563,11 +565,20 @@ describe('loadAgentFolder', () => {
       await appendSystemMd();
       await addFile(
         'sandbox/nono.json',
-        JSON.stringify({ filesystem: { read: 'nope', write: ['/ok'], unix_socket_dir_bind: 'nope' } })
+        JSON.stringify({
+          filesystem: { read: 'nope', write: ['/ok'], unix_socket: [42], unix_socket_dir_bind: 'nope' }
+        })
       );
       const folder = await loadAgentFolder(dir);
-      expect(folder.sandbox.filesystem).toEqual({ read: [], write: ['/ok'], allow: [], unixSocketDirBind: [] });
+      expect(folder.sandbox.filesystem).toEqual({
+        read: [],
+        write: ['/ok'],
+        allow: [],
+        unixSocket: [],
+        unixSocketDirBind: []
+      });
       expect(warningsText(folder)).toContain('read must be an array of strings');
+      expect(warningsText(folder)).toContain('unix_socket must be an array of strings');
       expect(warningsText(folder)).toContain('unix_socket_dir_bind must be an array of strings');
     });
 
@@ -578,6 +589,7 @@ describe('loadAgentFolder', () => {
         JSON.stringify({
           filesystem: {
             read: ['--danger', 'relative/x', '/ok', '~/ok', '$HOME/ok', '~', '$HOME'],
+            unix_socket: ['--danger', 'relative/socket', '~/.config/herdr/herdr.sock'],
             unix_socket_dir_bind: ['--danger', 'relative/socket', '~/.agent-browser']
           }
         })
@@ -585,6 +597,7 @@ describe('loadAgentFolder', () => {
       const folder = await loadAgentFolder(dir);
       expect(folder.sandbox.filesystem.read).toEqual(['/ok', '~/ok', '$HOME/ok', '~', '$HOME']);
       expect(folder.sandbox.filesystem.unixSocketDirBind).toEqual(['~/.agent-browser']);
+      expect(folder.sandbox.filesystem.unixSocket).toEqual(['~/.config/herdr/herdr.sock']);
       expect(warningsText(folder)).toContain('ignored: --danger, relative/x');
       expect(warningsText(folder)).toContain('ignored: --danger, relative/socket');
     });
@@ -593,7 +606,13 @@ describe('loadAgentFolder', () => {
       await appendSystemMd();
       await addFile('sandbox/nono.json', JSON.stringify({ filesystem: 'nope' }));
       const folder = await loadAgentFolder(dir);
-      expect(folder.sandbox.filesystem).toEqual({ read: [], write: [], allow: [], unixSocketDirBind: [] });
+      expect(folder.sandbox.filesystem).toEqual({
+        read: [],
+        write: [],
+        allow: [],
+        unixSocket: [],
+        unixSocketDirBind: []
+      });
       expect(warningsText(folder)).toContain('filesystem must be an object');
     });
 
@@ -733,6 +752,7 @@ describe('loadAgentFolder', () => {
         read: ['~/data', '/etc/certs'],
         write: ['$HOME/out'],
         allow: ['~/scratch', '/opt/cache'],
+        unixSocket: [],
         unixSocketDirBind: []
       });
       expect(folder.warnings).toEqual([]);
@@ -746,6 +766,21 @@ describe('loadAgentFolder', () => {
       expect(warningsText(folder)).toContain('ignored: --danger, relative/x');
     });
 
+    it('should warn and drop unix_socket as nono-only, keeping unixSocket empty', async () => {
+      await appendSystemMd();
+      await addFile(
+        'sandbox/sbx.json',
+        JSON.stringify({ filesystem: { read: ['/ok'], unix_socket: ['/tmp/herdr.sock'] } })
+      );
+      const folder = await loadAgentFolder(dir);
+      expect(folder.sbx.filesystem.unixSocket).toEqual([]);
+      expect(folder.sbx.filesystem.read).toEqual(['/ok']);
+      expect(warningsText(folder)).toContain(
+        'unix_socket is nono-only — Unix sockets cannot cross the sbx VM boundary; ignored'
+      );
+      expect(warningsText(folder)).not.toContain('unsupported keys ignored: unix_socket');
+    });
+
     it('should warn and drop unix_socket_dir_bind as nono-only, keeping unixSocketDirBind empty', async () => {
       await appendSystemMd();
       await addFile(
@@ -753,7 +788,13 @@ describe('loadAgentFolder', () => {
         JSON.stringify({ filesystem: { read: ['/ok'], unix_socket_dir_bind: ['~/.agent-browser'] } })
       );
       const folder = await loadAgentFolder(dir);
-      expect(folder.sbx.filesystem).toEqual({ read: ['/ok'], write: [], allow: [], unixSocketDirBind: [] });
+      expect(folder.sbx.filesystem).toEqual({
+        read: ['/ok'],
+        write: [],
+        allow: [],
+        unixSocket: [],
+        unixSocketDirBind: []
+      });
       expect(warningsText(folder)).toContain(
         'unix_socket_dir_bind is nono-only — Unix sockets cannot cross the sbx VM boundary; ignored'
       );
@@ -836,13 +877,13 @@ describe('loadAgentFolder', () => {
       expect(folder.sandbox).toEqual({
         posture: 'disabled',
         network: { block: true },
-        filesystem: { read: [], write: [], allow: [], unixSocketDirBind: [] },
+        filesystem: { read: [], write: [], allow: [], unixSocket: [], unixSocketDirBind: [] },
         unsafeMacosSeatbeltRules: []
       });
       expect(folder.sbx).toEqual({
         posture: 'enabled',
         network: { allowDomain: ['api.example.com'] },
-        filesystem: { read: [], write: [], allow: [], unixSocketDirBind: [] },
+        filesystem: { read: [], write: [], allow: [], unixSocket: [], unixSocketDirBind: [] },
         unsafeMacosSeatbeltRules: []
       });
       expect(folder.warnings).toEqual([]);

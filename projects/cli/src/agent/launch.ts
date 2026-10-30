@@ -3,13 +3,13 @@
 // optionally wrapped in `nono run` for the `'nono'` backend. The `'sbx'`
 // backend's `sbx exec` wrapper is composed later, at materialization in
 // `commands/run.ts` — out of scope here, see `LaunchSpec.backend`. Also
-// composes the spawn env — see `composeEnv` for cradle's single deliberate
-// env-var exception.
+// composes host mise and terminal integration environment overrides.
 
 import { join } from 'node:path';
 
 import { AGENT_BROWSER_NONO_FALLBACK_EXTENSION_FILE } from './extensions/agent-browser-nono-fallback.js';
 import type { AgentFolder, SandboxBackend } from './folder.js';
+import type { TerminalIntegrations } from './terminal-integrations.js';
 
 export interface LaunchSpec {
   readonly folder: AgentFolder;
@@ -67,6 +67,8 @@ export interface LaunchSpec {
    * printed) and on folders that declare no packages.
    */
   readonly packageEntries?: readonly string[];
+  /** Installed host terminal hooks and foreground detection hints discovered for this run. */
+  readonly terminalIntegrations?: TerminalIntegrations;
 }
 
 /**
@@ -89,7 +91,8 @@ function composeSystemPromptArgs(folder: AgentFolder): string[] {
  * Build the bare pi argv. `passthrough` lands last so user-passed flags win
  * under pi's last-wins parsing. The `-e` order is load-bearing: the generated
  * providers extension goes first, followed by the nono-only agent-browser
- * host-socket fallback, the resolved package entries, then the agent's own
+ * host-socket fallback, installed host terminal hooks, resolved package entries,
+ * then the agent's own
  * `extensions/` files — which load with the agent's providers registered,
  * nono subprocess compatibility configured, and any package-provided tools
  * already available, since the agent's own extensions may depend on them.
@@ -106,8 +109,7 @@ export function composePiArgv(spec: LaunchSpec): string[] {
   ];
   if (folder.providersJson !== null) argv.push('-e', join(spec.extensionsDir, 'providers.ts'));
   if (spec.backend === 'nono') argv.push('-e', join(spec.extensionsDir, AGENT_BROWSER_NONO_FALLBACK_EXTENSION_FILE));
-  for (const entry of spec.packageEntries ?? []) argv.push('-e', entry);
-  for (const extension of folder.extensionFiles) argv.push('-e', extension);
+  for (const extension of getExtensionFiles(spec)) argv.push('-e', extension);
   if (folder.skillsDir !== null) argv.push('--skill', folder.skillsDir);
   if (settings.defaultProvider !== undefined) argv.push('--provider', settings.defaultProvider);
   if (settings.defaultModel !== undefined) argv.push('--model', settings.defaultModel);
@@ -117,9 +119,17 @@ export function composePiArgv(spec: LaunchSpec): string[] {
   return argv;
 }
 
+function getExtensionFiles(spec: LaunchSpec): ReadonlySet<string> {
+  return new Set([
+    ...(spec.terminalIntegrations?.extensionFiles ?? []),
+    ...(spec.packageEntries ?? []),
+    ...spec.folder.extensionFiles
+  ]);
+}
+
 /**
- * Compose the spawn env for a nono-sandboxed run: `{ MISE_CACHE_DIR: spec.miseCacheDir }`;
- * `{}` for `'sbx'` and unsandboxed runs alike.
+ * Compose host environment overrides: private MISE_CACHE_DIR for nono, plus
+ * HERDR_AGENT=pi when running inside a Herdr pane on any backend.
  *
  * The generated profile denies the shared `~/Library/Caches/mise` on purpose
  * — a poisoned `bin_paths` cache would redirect which binaries the user's
@@ -130,15 +140,15 @@ export function composePiArgv(spec: LaunchSpec): string[] {
  * cache writes succeed (no warnings, working cache) while the shared host
  * cache stays untouched; mise creates the directory itself, cradle never
  * pre-creates or wipes it. Unsandboxed runs produce `{}` and keep the shared
- * host cache — no override needed since there's no sandbox denial to work
+ * host mise cache — no override needed since there's no sandbox denial to work
  * around; the sbx guest has no mise at all, and its HOME override rides the
  * `sbx exec` argv composed in `commands/run.ts` rather than env, so the
- * argv-only rule holds there too.
+ * Pi configuration still stays on argv there too.
  *
  * This deliberately overrides any user-set `MISE_CACHE_DIR` for sandboxed
  * runs — the profile wouldn't grant a custom location either, so honoring one
  * would just trade the warning spam for a silent cache-write failure. It is
- * also cradle's single exception to argv-only composition (see the module
+ * one of cradle's host-only exceptions to argv-only composition (see the module
  * header and `ARCHITECTURE.md`'s "Why argv" section): this configures mise,
  * not pi, so it doesn't touch the argv-survives-sandboxing rationale that
  * motivates keeping pi's own configuration on argv. The failure mode if this
@@ -146,7 +156,10 @@ export function composePiArgv(spec: LaunchSpec): string[] {
  * and the warnings return, nothing breaks.
  */
 export function composeEnv(spec: LaunchSpec): Record<string, string> {
-  return spec.backend === 'nono' ? { MISE_CACHE_DIR: spec.miseCacheDir } : {};
+  return {
+    ...(spec.backend === 'nono' ? { MISE_CACHE_DIR: spec.miseCacheDir } : {}),
+    ...spec.terminalIntegrations?.env
+  };
 }
 
 /**
