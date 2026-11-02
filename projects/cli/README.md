@@ -201,6 +201,31 @@ Chrome's **own** nested sandbox can't initialize inside nono's seatbelt (macOS f
 
 An agent can declare `{ "sandbox": false }` in `sandbox/nono.json` to opt out. Cradle then runs pi bare and warns on every run. An explicit `--sandbox` flag forces isolation back on.
 
+## MCP servers
+
+Cradle loads Pi’s built-in MCP, codemode, and tool-search extensions explicitly while keeping `--no-extensions` for other personal extensions. This requires Pi 1.4.0 or newer. Personal `~/.pi/agent/mcp.json` and trusted project `.pi/mcp.json` configurations remain available.
+
+`mcp.json` in the agent folder adds session-local servers through a generated `mcp.ts` extension using `pi.registerMcpServer`. The file must contain an `mcpServers` object:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    }
+  }
+}
+```
+
+Pi validates each server and manages stdio/streamable HTTP connections, environment substitution, OAuth, and tool exposure. A rejected registration warns without preventing the other servers from loading. Relative server working directories and arguments use the session’s working directory, not the agent folder.
+
+Personal and trusted project file configurations override agent registrations with the same server name, following Pi’s extension-registration rules. Agent registrations are session-local: `pi mcp list` does not show them. Use `/mcp` inside the Cradle session to inspect connections; server changes take effect on the next Cradle launch. File-level options such as `autoEnableCodemode` are not mapped from the agent file and warn as unsupported; configure them in Pi’s personal or project `mcp.json`.
+
+MCP servers receive the run’s existing sandbox grants and network policy. Cradle does not widen them automatically. Disable built-in MCP for one run with `cradle run ./my-agent -- --no-mcp`. See [Pi’s MCP documentation](https://pi.dev/docs/latest/mcp) for server configuration fields.
+
+See [`examples/mcp`](../../examples/mcp) for a complete agent.
+
 ## Build Targets
 
 The build produces platform-specific standalone binaries in `dist/`:

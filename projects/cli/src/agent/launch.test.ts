@@ -10,6 +10,7 @@ function createFolder(overrides: Partial<AgentFolder> = {}): AgentFolder {
     appendSystemFilePath: '/agents/helper/APPEND_SYSTEM.md',
     settings: {},
     providersJson: null,
+    mcpServersJson: null,
     skillsDir: null,
     scheduleDir: null,
     extensionFiles: [],
@@ -59,6 +60,12 @@ describe('composePiArgv', () => {
       '--no-skills',
       '--no-prompt-templates',
       '-e',
+      'builtin:mcp',
+      '-e',
+      'builtin:codemode',
+      '-e',
+      'builtin:tool-search',
+      '-e',
       '/state/helper/extensions/providers.ts',
       '-e',
       '/state/helper/extensions/agent-browser-nono-fallback.ts',
@@ -94,7 +101,7 @@ describe('composePiArgv', () => {
       sandboxed.indexOf('/ext/providers.ts')
     );
     const bare = composePiArgv(createSpec({ folder: createFolder({ extensionFiles }), sandbox: false }));
-    expect(bare[bare.indexOf('-e') + 1]).toBe('/agents/helper/extensions/flip.ts');
+    expect(bare.indexOf('/agents/helper/extensions/flip.ts')).toBeGreaterThan(bare.indexOf('builtin:tool-search'));
   });
 
   it('should compose the exact minimal argv when every optional part is absent (unsandboxed)', () => {
@@ -105,6 +112,12 @@ describe('composePiArgv', () => {
       '--no-extensions',
       '--no-skills',
       '--no-prompt-templates',
+      '-e',
+      'builtin:mcp',
+      '-e',
+      'builtin:codemode',
+      '-e',
+      'builtin:tool-search',
       '--session-dir',
       '/state/helper/sessions'
     ]);
@@ -139,7 +152,7 @@ describe('composePiArgv', () => {
     expect(argv[5]).toBe('--no-extensions');
   });
 
-  it('should place the generated providers extension as the first -e when present', () => {
+  it('should place the generated providers extension after the MCP built-ins', () => {
     const argv = composePiArgv(
       createSpec({
         folder: createFolder({ providersJson: '/agents/helper/models.json' }),
@@ -147,7 +160,7 @@ describe('composePiArgv', () => {
         extensionsDir: '/ext'
       })
     );
-    expect(argv[argv.indexOf('-e') + 1]).toBe('/ext/providers.ts');
+    expect(argv.indexOf('/ext/providers.ts')).toBe(argv.indexOf('builtin:tool-search') + 2);
   });
 
   it('should load the agent-browser nono fallback only on nono-backed runs', () => {
@@ -157,9 +170,27 @@ describe('composePiArgv', () => {
     expect(unsandboxed).not.toContain('/generated/agent-browser-nono-fallback.ts');
   });
 
-  it('should add no -e flags when no providers, packages, or agent extensions are present unsandboxed', () => {
+  it('should load only MCP built-ins when no agent extensions are configured', () => {
     const argv = composePiArgv(createSpec({ sandbox: false }));
-    expect(argv).not.toContain('-e');
+    expect(argv.filter(value => value.startsWith('builtin:'))).toEqual([
+      'builtin:mcp',
+      'builtin:codemode',
+      'builtin:tool-search'
+    ]);
+    expect(argv.filter(value => value === '-e')).toHaveLength(3);
+    expect(argv).toContain('--no-extensions');
+  });
+
+  it('should load generated MCP registrations before agent extensions and permit --no-mcp passthrough', () => {
+    const argv = composePiArgv(
+      createSpec({
+        folder: createFolder({ mcpServersJson: '{}', extensionFiles: ['/agent/custom.ts'] }),
+        passthrough: ['--no-mcp']
+      })
+    );
+    expect(argv.indexOf('/state/helper/extensions/mcp.ts')).toBeGreaterThan(argv.indexOf('builtin:mcp'));
+    expect(argv.indexOf('/state/helper/extensions/mcp.ts')).toBeLessThan(argv.indexOf('/agent/custom.ts'));
+    expect(argv.at(-1)).toBe('--no-mcp');
   });
 
   it('should keep passthrough args last so they win under last-wins parsing', () => {

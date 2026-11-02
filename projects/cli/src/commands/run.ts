@@ -11,6 +11,7 @@ import {
   emitAgentBrowserNonoFallbackExtension
 } from '../agent/extensions/agent-browser-nono-fallback.js';
 import { emitProvidersExtension } from '../agent/extensions/providers.js';
+import { emitMcpExtension, MCP_EXTENSION_FILE } from '../agent/extensions/mcp.js';
 import { loadAgentFolder, type AgentFolder, type AgentNetwork } from '../agent/folder.js';
 import { composeArgv, type LaunchSpec } from '../agent/launch.js';
 import { emitPackagesManifest, resolvePackageEntries, type NpmPackageSpec } from '../agent/packages.js';
@@ -537,6 +538,9 @@ function emitExtensionFiles(folder: AgentFolder, sandbox: boolean): TreeFile[] {
             content: emitProvidersExtension(folder.providersJson)
           }
         ]
+      : []),
+    ...(folder.mcpServersJson !== null
+      ? [{ rel: MCP_EXTENSION_FILE, content: emitMcpExtension(folder.mcpServersJson) }]
       : []),
     ...(sandbox
       ? [

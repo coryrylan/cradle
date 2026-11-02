@@ -118,6 +118,24 @@ describe('planRun', () => {
     expect(composeArgv(plan.launch)).toContain(join(plan.extensionsDir, 'providers.ts'));
   });
 
+  it('should materialize MCP registrations for sandboxed and unsandboxed agents and remove stale ones', async () => {
+    await addFile('mcp.json', '{"mcpServers":{"docs":{"url":"https://example.com/mcp"}}}');
+    for (const noSandbox of [true, false]) {
+      const plan = await planRun({ dir: agentDir, noSandbox }, deps);
+      const { argv } = await materializeRun(plan);
+      const extensionPath = join(plan.extensionsDir, 'mcp.ts');
+      expect(await readFile(extensionPath, 'utf8')).toContain('registerMcpServer');
+      expect(argv).toContain(extensionPath);
+      expect(argv).toContain('builtin:mcp');
+      expect(plan.warnings).toEqual([]);
+    }
+    await rm(join(agentDir, 'mcp.json'));
+    const plan = await planRun({ dir: agentDir }, deps);
+    const { argv } = await materializeRun(plan);
+    expect(argv).not.toContain(join(plan.extensionsDir, 'mcp.ts'));
+    expect(await exists(join(plan.extensionsDir, 'mcp.ts'))).toBe(false);
+  });
+
   it('should pass agent extensions/ files straight through after the sandbox fallback', async () => {
     await addFile('extensions/flip.ts', 'export default function () {};\n');
     const plan = await planRun({ dir: agentDir }, deps);
