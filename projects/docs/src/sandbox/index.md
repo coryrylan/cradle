@@ -1,22 +1,22 @@
 ---
 {
   title: 'Sandbox',
-  description: 'How the sandbox backend is chosen — nono (host OS policy) or sbx (Docker Sandboxes microVM) — and how to configure each.',
+  description: 'Configure optional nono sandboxing, filesystem grants, and network policy.',
   layout: 'index.11ty.js'
 }
 ---
 
 # Sandbox
 
-An agent runs sandboxed when its folder declares `sandbox/nono.json`, `sandbox/sbx.json`, or both — two independent backend opt-ins. Without either file, cradle warns and runs bare `pi`.
+An agent runs sandboxed when its folder declares `sandbox/nono.json`. Without that file, cradle warns and runs bare `pi` unless a CLI flag enables isolation.
 
-## Choosing a backend
+## Sandbox behavior
 
 [nono](https://github.com/nolabs-ai/nono) wraps `pi` in the host's own OS sandbox (Seatbelt on macOS). `pi` runs as your own user against your own filesystem, contained by policy — high host fidelity: your toolchain, your paths, and your loopback all work as-is. The Seatbelt escape hatch below exists because that policy engine has edge cases some tools need widened.
 
-[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (`sbx`) runs `pi` inside a microVM instead — a hard boundary, not a policy wrapper. The guest is a disposable Linux VM, so mac-only host integrations like `say` and agent-browser's Unix-socket daemon connection are simply inert inside it: `pi` warns and continues rather than failing the turn.
 
-Backend precedence: `--no-sandbox` (off, unconditionally) > `--sandbox-backend <nono|sbx>` (forces that backend on) > bare `--sandbox` (forces on, using the folder's declared backend, defaulting to nono) > the folder's own posture (`sandbox/nono.json` and `sandbox/sbx.json` are independent sibling opt-ins — a folder enabling both gets nono, with a warning naming `--sandbox-backend sbx` as the override) > restrictive network flags (`--offline`/`--allow-host`, which force nono on when neither file is configured) > unsandboxed default, with a warning.
+
+Sandbox precedence: `--no-sandbox` disables isolation; `--sandbox` forces it on; otherwise `sandbox/nono.json` controls it. Restrictive network flags (`--offline`/`--allow-host`) force isolation when the folder has not enabled it. With no sandbox configuration or restrictive flags, cradle runs bare `pi` with an OS-isolation warning. `--sandbox` uses the folder’s grants when present.
 
 ## sandbox/nono.json
 
@@ -48,7 +48,7 @@ Use `filesystem.unix_socket` for connect-only access to individual socket files:
 }
 ```
 
-Cradle expands `~` and `$HOME` and merges these paths with any automatically discovered host integration grants, removing duplicates. This grants no bind access or directory writes. `unix_socket_dir_bind` instead grants connect and bind access to direct-child sockets in a dedicated directory. Both keys are nono-only; sbx warns and ignores them because Unix sockets cannot cross its VM boundary.
+Cradle expands `~` and `$HOME` and merges these paths with any automatically discovered host integration grants, removing duplicates. This grants no bind access or directory writes. `unix_socket_dir_bind` instead grants connect and bind access to direct-child sockets in a dedicated directory.
 
 ### Network policy
 
@@ -112,71 +112,9 @@ cradle doesn't keep a shared global nono profile. On each run it generates a per
 
 Grant paths tightly. nono refuses to start if a grant overlaps its own state root, so **never** grant `~/` or `/Users` wholesale — widen only the specific paths a tool needs (like `~/.agent-browser` above).
 
-## sandbox/sbx.json
-
-The second backend: an agent runs inside [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) (`sbx`) — a disposable microVM, not an OS-policy wrapper — when it declares `sandbox/sbx.json`. It's a sibling opt-in to `sandbox/nono.json`, not a replacement: ship one, the other, or both — see Choosing a backend above for the tie-break.
-
-The schema is a restricted subset of nono's: `sandbox: false` opts out identically; `filesystem` supports `read`/`write`/`allow` only; `network` supports `block`/`allow_domain` only.
-
-```json
-{
-  "network": { "allow_domain": ["api.example.com", "localhost"] },
-  "filesystem": {
-    "read": ["~/data"],
-    "write": [],
-    "allow": ["~/scratch"]
-  }
-}
-```
-
-Keys `sandbox/nono.json` accepts that the VM boundary has no equivalent for — `unix_socket`, `unix_socket_dir_bind`, `network_profile`, `open_port`, `listen_port`, `unsafe_macos_seatbelt_rules` — are warned and dropped with a dedicated "nono-only" message rather than folded into the generic unsupported-key warning, so copying a working `nono.json` shows immediately which grants didn't survive the port. Everything else reuses nono's own field readers, so a malformed value fails the same way in both files.
-
-### Run model
-
-The guest mount list is fixed at sandbox-creation time, at verbatim host paths:
-
-| Mount                                         | Access |
-| --------------------------------------------- | ------ |
-| your cwd                                      | rw     |
-| the agent folder                              | ro     |
-| the per-agent state dir                       | rw     |
-| `~/.pi/agent`                                 | rw     |
-| linked git dir (worktree/submodule checkouts) | rw     |
-| `sandbox/sbx.json` `read` grants              | ro     |
-| `sandbox/sbx.json` `write`/`allow` grants     | rw     |
-
-Mounting `~/.pi/agent` matters because the final exec step overrides `HOME` inside the guest to point at it — a host `pi login` carries over unchanged, and any OAuth refresh the guest performs writes back to the same host files, so tokens never drift between the two environments.
-
-The sandbox itself is named `cradle-<agentId>-<hash8>`, where the hash keys the mount set (a sha256 over the sorted, order-insensitive mount list) — a changed grant gets a fresh sandbox instead of attaching to stale mounts. Stale sandboxes aren't reclaimed automatically; clean them up with `sbx rm`.
-
-Materializing a run executes a fixed setup sequence before spawning `pi`:
-
-1. `sbx create shell <mounts...> --name <name> -q` — an "already exists" error is treated as attach, not failure.
-2. each per-sandbox `sbx policy` rule (idempotent — see Network semantics below, safe to re-run every launch).
-3. provision: install `@earendil-works/pi-coding-agent` in-guest, pinned to the host's own `pi --version`, reinstalling only on a mismatch.
-4. `sbx exec -i [-t] -e HOME=<home> -w <cwd> <name> pi <argv...>` — `-t` rides only when stdout is a TTY.
-
-### Network semantics
-
-Differ from nono's, deliberately:
-
-- `network.block: true` becomes a single per-sandbox `sbx policy deny network --sandbox <name> '**'` (verified: this beats the sandbox's inherited global policy).
-- `allow_domain` becomes a single per-sandbox allow call: each domain expands to `d,*.d` — sbx matches an exact host and its subdomains as disjoint resources, so both are needed for one logical allow. Bare IPv4 entries pass through unchanged. `localhost`/`127.0.0.1` are dropped and replaced by `host.docker.internal` — guest loopback is the microVM itself, never the host, and `host.docker.internal` is the gateway sbx routes through its policy proxy back to the host's own loopback. The generated providers extension applies the same rewrite to `models.json` `baseUrl`s under sbx only.
-
-**A per-sandbox `allow` rule only ADDS to your machine's global `sbx` policy — it cannot subtract from it.** nono's `allow_domain` is a true allowlist because nono owns the whole proxy; sbx's is layered on top of Docker's own policy system, so strict allowlist semantics need a one-time `sbx policy init deny-all` run once per machine. cradle warns about this gap on every run that emits an allow rule.
-
-One-time machine setup, before the first sandboxed sbx run:
-
-```sh
-sbx login
-sbx policy init deny-all   # or allow-all / balanced — see sbx's own docs
-```
-
-`--dry-run` on an sbx-backend run also prints the `sbx create`/`sbx policy`/provision setup commands, in the order materialize runs them, before the final `sbx exec` argv wrapping the composed `pi` command — the printed provision argv is unpinned (the host `pi` version pin only resolves at materialize time). A silent, non-`--verbose` sbx run prints `🔒 Sandbox Active (sbx)` in place of nono's `🔒 Sandbox Active`.
-
 ## Opting out
 
-An agent that still can't run sandboxed can declare the opt-out in either file — `sandbox/nono.json` or `sandbox/sbx.json`:
+An agent can declare an opt-out in `sandbox/nono.json`:
 
 ```json
 {
@@ -184,4 +122,4 @@ An agent that still can't run sandboxed can declare the opt-out in either file �
 }
 ```
 
-cradle then runs `pi` bare and warns loudly on every run, naming whichever file disabled it. Precedence: explicit `--sandbox`/`--sandbox-backend`/`--no-sandbox` CLI flags > the folder's own posture (both files enabled → nono wins, with a warning naming `--sandbox-backend sbx` as the override) > restrictive network flags (`--offline`, `--allow-host`, which force nono on) > unsandboxed default. An explicit `--sandbox`/`--sandbox-backend` flag always forces isolation back on.
+Cradle then runs `pi` bare and warns on every run. `--sandbox` forces isolation back on; `--no-sandbox` disables it. Restrictive network flags force isolation unless `--no-sandbox` is passed.

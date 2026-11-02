@@ -1,6 +1,6 @@
 // Composes the launchd LaunchAgent artifact for a scheduled agent run — the
 // macOS half of the shared TimerPlan contract in `./timer.js`. Pure
-// composition, like `sbx/compose.ts` and `nono/profiles.ts`: no filesystem
+// composition, like `nono/profiles.ts`: no filesystem
 // writes, no `launchctl` spawning — that's the command layer's job.
 
 import { join } from 'node:path';

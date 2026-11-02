@@ -10,12 +10,11 @@
 
 ```sh
 cradle --version
-cradle doctor                         # check pi (required), nono/sbx/mise (recommended) on PATH, with versions
-cradle run ./my-agent               # run an agent folder with pi; sandboxed when sandbox/nono.json or sandbox/sbx.json exists
+cradle doctor                         # check pi (required), nono/mise (recommended) on PATH, with versions
+cradle run ./my-agent               # run an agent folder with pi; sandboxed when sandbox/nono.json exists
 cradle run my-agent                 # run a name from ~/.cradle/settings.json instead of a path
 cradle run . --offline              # block all outbound network (exfil protection)
 cradle run . --allow-host api.example.com  # restrict network to these hosts (repeatable)
-cradle run . --sandbox-backend sbx  # run under the sbx Docker Sandboxes microVM instead of nono
 cradle run . --no-sandbox           # run pi directly (debug)
 cradle run . --dry-run -- --resume  # print the write plan + command; forward `--resume` to pi
 
@@ -28,11 +27,9 @@ cradle schedule remove ./my-agent [task]     # unload + delete (every task, or o
 
 ## How `cradle run` works
 
-The agent runs in _your_ working directory by default — the agent folder is a parameter (default `.`), not a place cradle changes into. A [global alias](../aliases/) can set an optional startup `cwd` for named runs; a scheduled task's `cwd` takes precedence. `--dry-run` prints the effective cwd and the composed command.
+The agent runs in _your_ working directory by default — the agent folder is a parameter (default `.`), not a place cradle changes into. A [global alias](../aliases/) can set an optional startup `cwd` for named runs; a scheduled task's `cwd` takes precedence. `--dry-run` prints the generated-extension write plan and the composed command without spawning anything or requiring `pi` or `nono` to be installed.
 
 Everything after `--` is forwarded verbatim to `pi`. Use it for `pi`'s own flags, like `--resume` or `-p "prompt"`, without cradle trying to interpret them.
-
-`--dry-run` prints the generated-extension write plan and the composed command without spawning anything — and without requiring `pi`, `nono`, or `sbx` to be installed. For an sbx-backend run it also prints the `sbx create`/`sbx policy`/provision setup commands, in the order `cradle run` would run them, before the final `sbx exec` argv. Use it to see exactly what a run would do before it does it.
 
 Per-agent runtime state — generated extensions and session history — lives under `~/.cradle/agents/<name>-<hash>/`, outside the agent folder itself. That keeps the folder clean and committable: nothing a run writes ends up in your agent's source tree.
 
@@ -42,7 +39,7 @@ On macOS and Linux, `cradle run` automatically loads your installed Herdr and Mo
 
 Cradle reads `herdr-agent-state.ts` and `moshi-hooks.ts` from `~/.pi/agent/extensions/` (`PI_CODING_AGENT_DIR` overrides the Pi directory). Herdr requires its pane environment and `HERDR_SOCKET_PATH`; Moshi follows `MOSHI_SOCKET_PATH` or its platform socket location. Install Herdr's Pi integration with `herdr integration install pi`, and install Moshi's Pi hook through moshi-hook.
 
-Nono receives connect-only access to the exact socket files. The generated profile records those grants, and `--dry-run` shows the loaded hooks and Herdr detection hint. Scheduled runs exclude these integrations. With sbx, only the host wrapper identification applies; host hooks and sockets do not cross the microVM boundary.
+Nono receives connect-only access to the exact socket files. The generated profile records those grants, and `--dry-run` shows the loaded hooks and Herdr detection hint. Scheduled runs exclude these integrations.
 
 ## Flags
 
@@ -52,13 +49,12 @@ Nono receives connect-only access to the exact socket files. The generated profi
 | `--allow-host <host>`           | Restrict outbound network to the given host. Repeatable. Forces the sandbox on, same as `--offline`.                                                                                                        |
 | `--no-sandbox`                  | Run `pi` directly, without a sandbox wrapper. Useful for debugging. Combined with `--offline`/`--allow-host`, cradle warns the policy has no effect and runs with no network isolation.                     |
 | `--sandbox`                     | Force sandboxing on when no `sandbox/` file enables one or the folder opts out.                                                                                                                             |
-| `--sandbox-backend <nono\|sbx>` | Sandbox implementation (implies `--sandbox`): `nono` (host OS policy) or `sbx` (Docker Sandboxes microVM).                                                                                                  |
 | `--dry-run`                     | Print the write plan and composed command; don't spawn anything.                                                                                                                                            |
-| `--verbose`                     | Drop `nono`'s `--silent` flag to show its capabilities banner (nono backend only).                                                                                                                          |
+| `--verbose`                     | Drop `nono`'s `--silent` flag to show its capabilities banner.                                                                                                                          |
 | `-- <args>`                     | Forward everything after `--` to `pi` verbatim.                                                                                                                                                             |
 
-See [Sandbox](../sandbox/) for how `--offline`, `--allow-host`, `--no-sandbox`, `--sandbox-backend`, and a folder's own `sandbox/nono.json`/`sandbox/sbx.json` interact, and [Agent Folders](../agent-folders/) for what cradle reads out of the folder before it runs.
+See [Sandbox](../sandbox/) for how `--offline`, `--allow-host`, `--no-sandbox`, and a folder’s `sandbox/nono.json` interact.
 
 ## Doctor
 
-`cradle doctor` checks `pi` (required), and `nono`/`sbx`/`mise` plus your platform's timer backend — `launchctl` on macOS, `systemctl` on Linux — (recommended — each on your `PATH`, with version). `cradle run` reads the agent folder and launches `pi` in your current working directory (or the alias's configured `cwd`) — sandboxed inside `nono` or `sbx` when the folder declares `sandbox/nono.json`/`sandbox/sbx.json`, bare (with a warning) otherwise.
+`cradle doctor` checks `pi` (required), `nono`/`mise`, and your platform’s timer backend — `launchctl` on macOS, `systemctl` on Linux — (recommended, each with its resolved path and version). `cradle run` launches `pi` in your current working directory or the alias’s configured `cwd`, sandboxed through nono when `sandbox/nono.json` enables it, bare with a warning otherwise.

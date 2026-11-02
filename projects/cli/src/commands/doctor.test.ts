@@ -2,18 +2,17 @@ import { describe, it, expect } from 'bun:test';
 import { createWhichStub } from '../util/which.js';
 import { doctorExitCode, formatDoctorReport, runDoctor } from './doctor.js';
 
-const allFound = { pi: '/shims/pi', nono: '/shims/nono', sbx: '/shims/sbx', mise: '/shims/mise' };
+const allFound = { pi: '/shims/pi', nono: '/shims/nono', mise: '/shims/mise' };
 // Pinned so these assertions are deterministic on any CI/dev machine —
 // scheduleBackendBin's own platform branching is covered separately below.
 const darwin = { platform: 'darwin' as const };
 
 describe('runDoctor', () => {
-  it('should require pi and recommend nono, sbx, mise, and the platform scheduling backend', async () => {
+  it('should require pi and recommend nono, mise, and the platform scheduling backend', async () => {
     const checks = await runDoctor({ which: createWhichStub({}), ...darwin });
-    expect(checks.map(check => check.name)).toEqual(['pi', 'nono', 'sbx', 'mise', 'launchctl']);
+    expect(checks.map(check => check.name)).toEqual(['pi', 'nono', 'mise', 'launchctl']);
     expect(checks.find(check => check.name === 'pi')?.required).toBe(true);
     expect(checks.find(check => check.name === 'nono')?.required).toBe(false);
-    expect(checks.find(check => check.name === 'sbx')?.required).toBe(false);
     expect(checks.find(check => check.name === 'mise')?.required).toBe(false);
     expect(checks.find(check => check.name === 'launchctl')?.required).toBe(false);
   });
@@ -21,24 +20,24 @@ describe('runDoctor', () => {
   it('should attach a not-required note to missing optional tools', async () => {
     const missing = await runDoctor({ which: createWhichStub({ pi: '/p' }), ...darwin });
     expect(missing.find(check => check.name === 'nono')?.note).toContain('required for sandboxed runs');
-    expect(missing.find(check => check.name === 'sbx')?.note).toContain('required for sbx-backend runs');
     expect(missing.find(check => check.name === 'mise')?.note).toContain('recommended');
     expect(missing.find(check => check.name === 'launchctl')?.note).toContain('recommended for `cradle schedule`');
     const present = await runDoctor({ which: createWhichStub({ ...allFound, launchctl: '/l' }), ...darwin });
     expect(present.find(check => check.name === 'nono')?.note).toBeUndefined();
-    expect(present.find(check => check.name === 'sbx')?.note).toBeUndefined();
     expect(present.find(check => check.name === 'mise')?.note).toBeUndefined();
     expect(present.find(check => check.name === 'launchctl')?.note).toBeUndefined();
   });
 
-  it('should ask for the sbx version via its version subcommand, and the default flag for the rest', async () => {
-    const calls: (readonly string[] | undefined)[] = [];
-    const readVersion = async (_binPath: string, args?: readonly string[]): Promise<string | null> => {
-      calls.push(args);
-      return '1.0.0';
-    };
-    await runDoctor({ which: createWhichStub(allFound), readVersion, ...darwin });
-    expect(calls).toEqual([undefined, undefined, ['version'], undefined, undefined]);
+  it('should probe only supported tools', async () => {
+    const calls: string[] = [];
+    await runDoctor({
+      which: bin => {
+        calls.push(bin);
+        return null;
+      },
+      ...darwin
+    });
+    expect(calls).toEqual(['pi', 'nono', 'mise', 'launchctl']);
   });
 
   it('should report resolved paths for found bins', async () => {
@@ -96,7 +95,7 @@ describe('runDoctor', () => {
 
     it('should skip the check entirely on a platform with neither backend', async () => {
       const checks = await runDoctor({ which: createWhichStub({}), platform: 'win32' });
-      expect(checks.map(check => check.name)).toEqual(['pi', 'nono', 'sbx', 'mise']);
+      expect(checks.map(check => check.name)).toEqual(['pi', 'nono', 'mise']);
     });
   });
 });

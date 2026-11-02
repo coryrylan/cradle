@@ -1,6 +1,6 @@
 // Loader/validator for the agent folder format (see /ARCHITECTURE.md). A folder
 // with a SYSTEM.md or APPEND_SYSTEM.md is a complete agent; settings.json,
-// models.json, skills/, extensions/, and sandbox/nono.json + sandbox/sbx.json
+// models.json, skills/, extensions/, and sandbox/nono.json
 // are optional. A folder with neither system-prompt file, and malformed JSON,
 // are hard errors; everything else unexpected is a warning + continue.
 
@@ -71,21 +71,10 @@ export interface AgentNetwork {
 
 export type AgentSandboxPosture = 'unconfigured' | 'enabled' | 'disabled';
 
-/**
- * The sandbox enforcement backend a folder can declare a posture for: `nono`
- * (Seatbelt/bubblewrap, `sandbox/nono.json`) or `sbx` (Docker Sandboxes
- * microVM, `sandbox/sbx.json`). Backend resolution — which one actually runs
- * — is a `commands/run.ts` concern; this module only reads each file's
- * declared posture.
- */
-export type SandboxBackend = 'nono' | 'sbx';
-
 export interface AgentSandbox {
   /**
-   * The declaring file's sandbox posture. `'unconfigured'` when the folder
-   * has no `sandbox/nono.json` (for the `sandbox` field) or no
-   * `sandbox/sbx.json` (for the `sbx` field); otherwise mirrors the file's
-   * `sandbox` key (absent ⇒ `'enabled'`).
+   * The sandbox/nono.json posture: absent means 'unconfigured';
+   * otherwise its sandbox key controls whether isolation is enabled.
    */
   readonly posture: AgentSandboxPosture;
   readonly network?: AgentNetwork;
@@ -122,14 +111,6 @@ export interface AgentFolder {
   readonly extensionFiles: readonly string[];
   /** `sandbox/nono.json`'s declared posture — the Seatbelt/bubblewrap backend. */
   readonly sandbox: AgentSandbox;
-  /**
-   * `sandbox/sbx.json`'s declared posture — the Docker Sandboxes microVM
-   * backend. A restricted subset of nono's schema: no Unix-socket grants, no
-   * named network-profile pass-through, no Seatbelt escape hatch — the VM
-   * boundary has no equivalent for them, so those keys are warned-and-dropped
-   * rather than silently accepted. See `readSbxSandbox`.
-   */
-  readonly sbx: AgentSandbox;
   readonly warnings: readonly string[];
 }
 
@@ -168,7 +149,7 @@ export async function loadAgentFolder(dir: string): Promise<AgentFolder> {
 
   const warnings: string[] = [];
   warnUnknownEntries(entries, warnings);
-  const sandboxes = await loadSandbox(abs, byName.get('sandbox'), warnings);
+  const sandbox = await loadSandbox(abs, byName.get('sandbox'), warnings);
   return {
     dir: abs,
     systemFilePath: hasSystem ? join(abs, 'SYSTEM.md') : null,
@@ -178,8 +159,7 @@ export async function loadAgentFolder(dir: string): Promise<AgentFolder> {
     skillsDir: await resolveSkillsDir(abs, byName.get('skills'), warnings),
     scheduleDir: await resolveScheduleDir(abs, byName.get('schedule'), warnings),
     extensionFiles: await loadExtensions(abs, byName.get('extensions'), warnings),
-    sandbox: sandboxes.nono,
-    sbx: sandboxes.sbx,
+    sandbox,
     warnings
   };
 }
@@ -403,40 +383,17 @@ async function loadExtensions(abs: string, entry: Dirent | undefined, warnings: 
   return candidates.filter((file): file is string => file !== null);
 }
 
-interface AgentSandboxesByBackend {
-  readonly nono: AgentSandbox;
-  readonly sbx: AgentSandbox;
-}
-
-/**
- * Read both `sandbox/nono.json` and `sandbox/sbx.json` — the two backends are
- * independent, sibling opt-ins, each gating its own posture. Only their
- * shared absence is a warning: a folder that ships just one of the two has
- * made a deliberate, valid choice.
- */
-async function loadSandbox(
-  abs: string,
-  entry: Dirent | undefined,
-  warnings: string[]
-): Promise<AgentSandboxesByBackend> {
-  const empty: AgentSandboxesByBackend = { nono: EMPTY_SANDBOX, sbx: EMPTY_SANDBOX };
-  if (!entry) return empty;
+async function loadSandbox(abs: string, entry: Dirent | undefined, warnings: string[]): Promise<AgentSandbox> {
+  if (!entry) return EMPTY_SANDBOX;
   if (!(await isDirectoryEntry(abs, entry))) {
     warnings.push('sandbox must be a directory — ignored');
-    return empty;
+    return EMPTY_SANDBOX;
   }
-  const nonoPath = join(abs, 'sandbox', 'nono.json');
-  const sbxPath = join(abs, 'sandbox', 'sbx.json');
-  const nonoJson = await readSandboxJson(nonoPath);
-  const sbxJson = await readSandboxJson(sbxPath);
-  if (nonoJson === undefined && sbxJson === undefined) {
-    warnings.push('sandbox/ has no nono.json or sbx.json — sandboxing stays off unless --sandbox is passed');
-    return empty;
-  }
-  return {
-    nono: nonoJson === undefined ? EMPTY_SANDBOX : readNonoSandbox(nonoJson, nonoPath, warnings),
-    sbx: sbxJson === undefined ? EMPTY_SANDBOX : readSbxSandbox(sbxJson, sbxPath, warnings)
-  };
+  const path = join(abs, 'sandbox', 'nono.json');
+  const json = await readSandboxJson(path);
+  if (json !== undefined) return readNonoSandbox(json, path, warnings);
+  warnings.push('sandbox/ has no nono.json — sandboxing stays off unless --sandbox is passed');
+  return EMPTY_SANDBOX;
 }
 
 function readNonoSandbox(json: { readonly [key: string]: JsonValue }, path: string, warnings: string[]): AgentSandbox {
@@ -455,106 +412,7 @@ function readNonoSandbox(json: { readonly [key: string]: JsonValue }, path: stri
 }
 
 /**
- * Read `sandbox/sbx.json`: a restricted subset of nono.json's schema for the
- * sbx microVM backend. Keys with no VM-boundary equivalent
- * (`unix_socket`, `unix_socket_dir_bind`, `network_profile`, `open_port`, `listen_port`,
- * `unsafe_macos_seatbelt_rules`) are warned-and-dropped with a dedicated
- * "nono-only" message rather than folded into the generic unsupported-key
- * warning, so an author copying a nono.json profile learns immediately which
- * grants don't carry over. Everything else reuses nono's own readers, so a
- * malformed value (wrong type, non-path-shaped entry, …) fails the exact same
- * way in both files.
- */
-function readSbxSandbox(json: { readonly [key: string]: JsonValue }, path: string, warnings: string[]): AgentSandbox {
-  const enabled = readBooleanKey(json, 'sandbox', path, warnings);
-  const network = readSbxNetwork(json, path, warnings);
-  warnNonoOnlyKey(
-    { record: json, key: 'unsafe_macos_seatbelt_rules', path, explanation: 'the sbx VM boundary replaces Seatbelt' },
-    warnings
-  );
-  warnUnsupportedKeys(json, path, ['sandbox', 'network', 'filesystem', 'unsafe_macos_seatbelt_rules'], warnings);
-  return {
-    posture: enabled === false ? 'disabled' : 'enabled',
-    ...(network !== undefined ? { network } : {}),
-    filesystem: readSbxGrants(json['filesystem'], path, warnings),
-    unsafeMacosSeatbeltRules: []
-  };
-}
-
-/** sbx.json's `network` block: `block` and `allow_domain` only — see `readSbxSandbox`. */
-function readSbxNetwork(
-  record: { readonly [key: string]: JsonValue },
-  path: string,
-  warnings: string[]
-): AgentNetwork | undefined {
-  const value = record['network'];
-  if (value === undefined) return undefined;
-  if (!isRecord(value)) {
-    warnings.push(`${path}: network must be an object — ignored`);
-    return undefined;
-  }
-  for (const key of ['network_profile', 'open_port', 'listen_port'])
-    warnNonoOnlyKey({ record: value, key, path }, warnings);
-  const where = `${path} network`;
-  warnUnsupportedKeys(value, where, ['block', 'allow_domain', 'network_profile', 'open_port', 'listen_port'], warnings);
-  const block = readBooleanKey(value, 'block', where, warnings);
-  const allowDomain = readHostList(value, 'allow_domain', where, warnings);
-  const network: AgentNetwork = {
-    ...(block !== undefined ? { block } : {}),
-    ...(allowDomain.length > 0 ? { allowDomain } : {})
-  };
-  return Object.keys(network).length > 0 ? network : undefined;
-}
-
-/** sbx.json's `filesystem` block: `read`/`write`/`allow` only — see `readSbxSandbox`. */
-function readSbxGrants(value: JsonValue | undefined, path: string, warnings: string[]): AgentSandboxGrants {
-  if (value === undefined) return EMPTY_GRANTS;
-  if (!isRecord(value)) {
-    warnings.push(`${path}: filesystem must be an object — ignored`);
-    return EMPTY_GRANTS;
-  }
-  ['unix_socket', 'unix_socket_dir_bind'].forEach(key => {
-    warnNonoOnlyKey(
-      { record: value, key, path, explanation: 'Unix sockets cannot cross the sbx VM boundary' },
-      warnings
-    );
-  });
-  warnUnsupportedKeys(
-    value,
-    `${path} filesystem`,
-    ['read', 'write', 'allow', 'unix_socket', 'unix_socket_dir_bind'],
-    warnings
-  );
-  return {
-    read: readStringList(value, 'read', path, warnings),
-    write: readStringList(value, 'write', path, warnings),
-    allow: readStringList(value, 'allow', path, warnings),
-    unixSocket: [],
-    unixSocketDirBind: []
-  };
-}
-
-interface NonoOnlyKeyWarning {
-  readonly record: { readonly [key: string]: JsonValue };
-  readonly key: string;
-  readonly path: string;
-  /** Why the sbx VM boundary can't honor this key; omit for a bare "ignored". */
-  readonly explanation?: string;
-}
-
-/**
- * sbx.json's dedicated "this key is nono-only" warning — used for keys that
- * have no sbx VM-boundary equivalent at all, as opposed to a key that exists
- * in both but is merely malformed. Presence alone triggers it; the value is
- * never inspected, since it's being dropped regardless of shape.
- */
-function warnNonoOnlyKey({ record, key, path, explanation }: NonoOnlyKeyWarning, warnings: string[]): void {
-  if (record[key] === undefined) return;
-  warnings.push(`${path}: ${key} is nono-only — ${explanation !== undefined ? `${explanation}; ` : ''}ignored`);
-}
-
-/**
- * Read + parse a sandbox/ config file (nono.json or sbx.json) once, through
+ * Read + parse sandbox/nono.json once, through
  * the same friendly-error path as settings.json/models.json
  * (`readJsonObject` — the file may be an unreadable directory or a broken
  * symlink, and both need path-named errors, not a raw fs error or a silent
