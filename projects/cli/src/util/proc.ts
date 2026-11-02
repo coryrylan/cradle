@@ -60,33 +60,8 @@ export async function runForeground(
 }
 
 /**
- * Run a setup command silently, capturing stderr for the caller's error
- * message — the sbx create/policy/provision sequence, see
- * `commands/run.ts`'s `MaterializeDeps.run`. Never throws on a non-zero
- * exit: the caller decides which failures matter (an sbx create name
- * collision means attach, not failure).
- */
-export async function runCapture(argv: readonly string[]): Promise<{ exitCode: number; stderr: string }> {
-  const [cmd, ...rest] = argv;
-  if (!cmd) {
-    throw new Error('Command requires at least one argument');
-  }
-
-  const proc = Bun.spawn([cmd, ...rest], {
-    stdin: 'ignore',
-    stdout: 'ignore',
-    stderr: 'pipe',
-    env: process.env
-  });
-
-  const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
-  return { exitCode, stderr };
-}
-
-/**
  * Run a command capturing BOTH streams — `commands/schedule.ts`'s
- * launchctl/systemctl/loginctl steps, which (unlike `runCapture`'s
- * sbx setup, stderr-only) need stdout too: the linger check
+ * launchctl/systemctl/loginctl steps. The linger check
  * (`loginctl show-user --property=Linger`) reports its answer there. Never
  * throws on a non-zero exit; the caller decides which failures matter
  * (`TimerStep.ignoreFailure`).

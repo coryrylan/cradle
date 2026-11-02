@@ -16,7 +16,7 @@ async function runCli(args: string[], env: Record<string, string> = {}): Promise
     cwd: PKG_ROOT,
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env, ...env }
+    env: { ...process.env, HERDR_ENV: '', MOSHI_SOCKET_PATH: join(tmpdir(), 'cradle-no-daemon.sock'), ...env }
   });
   const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
   const exitCode = await proc.exited;
@@ -73,7 +73,7 @@ describe('run command', () => {
     const { stdout, stderr, exitCode } = await runCli(['run', agentDir, '--dry-run'], env);
     expect(stdout.trim().split('\n').at(-1)?.startsWith('pi --append-system-prompt')).toBe(true);
     expect(stdout).not.toContain('agent-browser-nono-fallback.ts');
-    expect(stderr).toContain('sandbox/nono.json or sbx.json not found');
+    expect(stderr).toContain('sandbox/nono.json not found');
     expect(exitCode).toBe(0);
   });
 

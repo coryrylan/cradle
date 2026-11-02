@@ -1,6 +1,5 @@
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
-import type { SandboxBackend } from './folder.js';
 
 export interface TerminalIntegrations {
   readonly extensionFiles: readonly string[];
@@ -12,7 +11,6 @@ interface TerminalIntegrationSpec {
   readonly home: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly platform: NodeJS.Platform;
-  readonly backend: SandboxBackend | null;
   readonly enabled: boolean;
 }
 
@@ -21,7 +19,6 @@ export async function getTerminalIntegrations({
   home,
   env,
   platform,
-  backend,
   enabled
 }: TerminalIntegrationSpec): Promise<TerminalIntegrations> {
   const inHerdr = enabled && env.HERDR_ENV === '1';
@@ -30,7 +27,7 @@ export async function getTerminalIntegrations({
     socketPaths: [],
     env: inHerdr ? { HERDR_AGENT: 'pi' } : {}
   };
-  if (!enabled || backend === 'sbx' || platform === 'win32') return result;
+  if (!enabled || platform === 'win32') return result;
   const extensionsDir = join(env.PI_CODING_AGENT_DIR || join(home, '.pi', 'agent'), 'extensions');
   const candidates = [
     { extension: 'herdr-agent-state.ts', socket: inHerdr ? env.HERDR_SOCKET_PATH : undefined },

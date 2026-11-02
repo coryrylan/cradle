@@ -1,14 +1,9 @@
-// Composes the argv that runs an agent folder: an explicit `pi` invocation
-// (system prompt, generated extensions, skills, model settings, session dir),
-// optionally wrapped in `nono run` for the `'nono'` backend. The `'sbx'`
-// backend's `sbx exec` wrapper is composed later, at materialization in
-// `commands/run.ts` — out of scope here, see `LaunchSpec.backend`. Also
-// composes host mise and terminal integration environment overrides.
+// Compose pi argv and optional nono wrapping with host environment overrides.
 
 import { join } from 'node:path';
 
 import { AGENT_BROWSER_NONO_FALLBACK_EXTENSION_FILE } from './extensions/agent-browser-nono-fallback.js';
-import type { AgentFolder, SandboxBackend } from './folder.js';
+import type { AgentFolder } from './folder.js';
 import type { TerminalIntegrations } from './terminal-integrations.js';
 
 export interface LaunchSpec {
@@ -28,16 +23,8 @@ export interface LaunchSpec {
    * from the plan's `statePaths` derivation like `extensionsDir`/`sessionsDir`.
    */
   readonly miseCacheDir: string;
-  /**
-   * Which sandbox backend wraps this run, or `null` for unsandboxed. `'nono'`
-   * wraps the argv here — see `composeArgv`. `'sbx'` does NOT wrap here: its
-   * `sbx exec` wrapper is composed at materialization in `commands/run.ts`,
-   * so `composeArgv` returns the bare pi argv for both `'sbx'` and `null`.
-   * For `'sbx'`, `piBin` is the literal `pi` — resolved on the guest's PATH,
-   * since host paths (mise-shim included) are meaningless inside the
-   * microVM.
-   */
-  readonly backend: SandboxBackend | null;
+  /** Whether nono wraps this launch. */
+  readonly sandbox: boolean;
   readonly passthrough: readonly string[];
   /** Resolved path, or bare `nono` for dry-run previews. */
   readonly nonoBin: string;
@@ -48,10 +35,10 @@ export interface LaunchSpec {
    * install tree (see `nono/cradle-pi.json`), so the absolute path resolves
    * inside the sandbox too; a bare `pi` only resolves on whatever PATH the
    * spawning process happens to have, which is exactly the gap a fresh
-   * mise-only install falls into. See `backend` for the `'sbx'` exception.
+   * mise-only install falls into.
    */
   readonly piBin: string;
-  /** Abs path of the generated per-agent nono profile; used only when `backend` is `'nono'`. */
+  /** Abs path of the generated per-agent nono profile; used only when `sandbox` is true. */
   readonly profilePath: string;
   /**
    * When true, nono runs without `--silent` so its capabilities banner
@@ -108,7 +95,7 @@ export function composePiArgv(spec: LaunchSpec): string[] {
     '--no-prompt-templates'
   ];
   if (folder.providersJson !== null) argv.push('-e', join(spec.extensionsDir, 'providers.ts'));
-  if (spec.backend === 'nono') argv.push('-e', join(spec.extensionsDir, AGENT_BROWSER_NONO_FALLBACK_EXTENSION_FILE));
+  if (spec.sandbox) argv.push('-e', join(spec.extensionsDir, AGENT_BROWSER_NONO_FALLBACK_EXTENSION_FILE));
   for (const extension of getExtensionFiles(spec)) argv.push('-e', extension);
   if (folder.skillsDir !== null) argv.push('--skill', folder.skillsDir);
   if (settings.defaultProvider !== undefined) argv.push('--provider', settings.defaultProvider);
@@ -129,7 +116,7 @@ function getExtensionFiles(spec: LaunchSpec): ReadonlySet<string> {
 
 /**
  * Compose host environment overrides: private MISE_CACHE_DIR for nono, plus
- * HERDR_AGENT=pi when running inside a Herdr pane on any backend.
+ * HERDR_AGENT=pi when running inside a Herdr pane with or without sandboxing.
  *
  * The generated profile denies the shared `~/Library/Caches/mise` on purpose
  * — a poisoned `bin_paths` cache would redirect which binaries the user's
@@ -141,9 +128,7 @@ function getExtensionFiles(spec: LaunchSpec): ReadonlySet<string> {
  * cache stays untouched; mise creates the directory itself, cradle never
  * pre-creates or wipes it. Unsandboxed runs produce `{}` and keep the shared
  * host mise cache — no override needed since there's no sandbox denial to work
- * around; the sbx guest has no mise at all, and its HOME override rides the
- * `sbx exec` argv composed in `commands/run.ts` rather than env, so the
- * Pi configuration still stays on argv there too.
+ * around.
  *
  * This deliberately overrides any user-set `MISE_CACHE_DIR` for sandboxed
  * runs — the profile wouldn't grant a custom location either, so honoring one
@@ -157,16 +142,13 @@ function getExtensionFiles(spec: LaunchSpec): ReadonlySet<string> {
  */
 export function composeEnv(spec: LaunchSpec): Record<string, string> {
   return {
-    ...(spec.backend === 'nono' ? { MISE_CACHE_DIR: spec.miseCacheDir } : {}),
+    ...(spec.sandbox ? { MISE_CACHE_DIR: spec.miseCacheDir } : {}),
     ...spec.terminalIntegrations?.env
   };
 }
 
 /**
- * Build the argv for `nono run … -- pi …` when `spec.backend` is `'nono'`, or
- * the bare pi argv otherwise (`'sbx'` or `null`) — the `'sbx'` backend's own
- * `sbx exec` wrapper is composed later, at materialization in
- * `commands/run.ts`, not here (see `LaunchSpec.backend`).
+ * Build the argv for `nono run … -- pi …` when sandboxed, or bare pi otherwise.
  *
  * All filesystem grants (cwd, agent dir, state dir, and the agent's own
  * `sandbox/nono.json` entries) AND the network posture live inside the
@@ -188,7 +170,7 @@ export function composeEnv(spec: LaunchSpec): Record<string, string> {
  */
 export function composeArgv(spec: LaunchSpec): string[] {
   const piArgv = composePiArgv(spec);
-  if (spec.backend !== 'nono') return piArgv;
+  if (!spec.sandbox) return piArgv;
   return [
     spec.nonoBin,
     'run',

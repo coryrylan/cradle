@@ -11,8 +11,8 @@ export interface DoctorCheck {
 
 interface DoctorDeps {
   readonly which?: WhichFn;
-  /** Read a bin's version output (default argv `--version`; sbx passes `['version']`); injected so in-process tests never spawn. */
-  readonly readVersion?: (binPath: string, args?: readonly string[]) => Promise<string | null>;
+  /** Read a bin's --version output; injected so in-process tests never spawn. */
+  readonly readVersion?: (binPath: string) => Promise<string | null>;
   /** Injectable so both the launchd and systemd probes are exercised from any one machine's tests. */
   readonly platform?: NodeJS.Platform;
 }
@@ -27,8 +27,6 @@ const MISE_RECOMMENDED_NOTE =
   'recommended: the supported way to install pi/nono — cradle resolves them from mise shims and the sandbox profile assumes a mise-managed install';
 const NONO_SANDBOX_NOTE =
   'required for sandboxed runs (a folder declaring sandbox/nono.json, or --sandbox/--offline/--allow-host); not needed otherwise';
-const SBX_SANDBOX_NOTE =
-  'required for sbx-backend runs (a folder declaring sandbox/sbx.json, or --sandbox-backend sbx); not needed otherwise';
 const LAUNCHD_SCHEDULE_NOTE =
   'recommended for `cradle schedule`: installs schedule/*.md tasks as launchd LaunchAgents; not needed otherwise';
 const SYSTEMD_SCHEDULE_NOTE =
@@ -53,7 +51,6 @@ function optionalCheck(name: string, found: string | null, version: string | nul
 interface ProbedBins {
   readonly piPath: string | null;
   readonly nonoPath: string | null;
-  readonly sbxPath: string | null;
   readonly misePath: string | null;
   readonly scheduleBin: 'launchctl' | 'systemctl' | null;
   readonly schedulePath: string | null;
@@ -65,7 +62,6 @@ function probeBins(deps: DoctorDeps): ProbedBins {
   return {
     piPath: find('pi'),
     nonoPath: find('nono'),
-    sbxPath: find('sbx'),
     misePath: find('mise'),
     scheduleBin,
     schedulePath: scheduleBin !== null ? find(scheduleBin) : null
@@ -73,28 +69,25 @@ function probeBins(deps: DoctorDeps): ProbedBins {
 }
 
 /**
- * Probe the environment cradle depends on: `pi` (always required), `nono` and
- * `sbx` (each required only for runs on its backend — see the notes), `mise`
+ * Probe the environment cradle depends on: `pi` (always required), `nono`
+ * (required only for sandboxed runs), `mise`
  * (recommended toolchain manager), and the platform's scheduling backend
  * (`launchctl`/`systemctl`, recommended for `cradle schedule`; skipped
  * entirely on a platform with neither).
  */
 export async function runDoctor(deps: DoctorDeps = {}): Promise<DoctorCheck[]> {
-  const version = async (found: string | null, args?: readonly string[]): Promise<string | null> =>
-    found !== null && deps.readVersion ? deps.readVersion(found, args) : null;
+  const version = async (found: string | null): Promise<string | null> =>
+    found !== null && deps.readVersion ? deps.readVersion(found) : null;
   const bins = probeBins(deps);
-  // sbx has no `--version` flag; its version rides the `sbx version` subcommand.
-  const [piVersion, nonoVersion, sbxVersion, miseVersion, scheduleVersion] = await Promise.all([
+  const [piVersion, nonoVersion, miseVersion, scheduleVersion] = await Promise.all([
     version(bins.piPath),
     version(bins.nonoPath),
-    version(bins.sbxPath, ['version']),
     version(bins.misePath),
     version(bins.schedulePath)
   ]);
   return [
     { name: 'pi', bin: 'pi', required: true, found: bins.piPath, version: piVersion },
     optionalCheck('nono', bins.nonoPath, nonoVersion, NONO_SANDBOX_NOTE),
-    optionalCheck('sbx', bins.sbxPath, sbxVersion, SBX_SANDBOX_NOTE),
     optionalCheck('mise', bins.misePath, miseVersion, MISE_RECOMMENDED_NOTE),
     ...(bins.scheduleBin !== null
       ? [optionalCheck(bins.scheduleBin, bins.schedulePath, scheduleVersion, scheduleBackendNote(bins.scheduleBin))]

@@ -43,7 +43,7 @@ async function createHooks(): Promise<void> {
 }
 
 function getIntegrations(env: Record<string, string> = {}, platform: NodeJS.Platform = 'linux') {
-  return getTerminalIntegrations({ home: root, env, platform, backend: 'nono', enabled: true });
+  return getTerminalIntegrations({ home: root, env, platform, enabled: true });
 }
 
 describe('getTerminalIntegrations', () => {
@@ -105,20 +105,15 @@ describe('getTerminalIntegrations', () => {
     ]);
   });
 
-  it('should omit host hooks and socket grants for sbx and Windows, retaining the Herdr host hint', async () => {
+  it('should omit host hooks and socket grants on Windows, retaining the Herdr host hint', async () => {
     await createHooks();
     const socket = await createSocket(join(root, 'm.sock'));
     const env = { HERDR_ENV: '1', HERDR_SOCKET_PATH: socket, MOSHI_SOCKET_PATH: socket };
-    for (const spec of [
-      { backend: 'sbx' as const, platform: 'linux' as const },
-      { backend: null, platform: 'win32' as const }
-    ]) {
-      expect(await getTerminalIntegrations({ home: root, env, enabled: true, ...spec })).toEqual({
-        extensionFiles: [],
-        socketPaths: [],
-        env: { HERDR_AGENT: 'pi' }
-      });
-    }
+    expect(await getTerminalIntegrations({ home: root, env, enabled: true, platform: 'win32' })).toEqual({
+      extensionFiles: [],
+      socketPaths: [],
+      env: { HERDR_AGENT: 'pi' }
+    });
   });
 
   it('should leave scheduled runs unchanged even when terminal hooks and sockets are available', async () => {
@@ -128,7 +123,6 @@ describe('getTerminalIntegrations', () => {
       await getTerminalIntegrations({
         home: root,
         platform: 'linux',
-        backend: 'nono',
         enabled: false,
         env: { HERDR_ENV: '1', HERDR_SOCKET_PATH: socket, MOSHI_SOCKET_PATH: socket }
       })

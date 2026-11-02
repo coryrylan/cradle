@@ -1,13 +1,9 @@
-// `cradle run <dir>`: load an agent folder, generate its pi extensions into
-// the per-agent state dir, and compose the launch — pi wrapped in `nono run`
-// for the nono backend, or run through `sbx exec` (after create/policy/
-// provision setup) for the sbx backend. Split into a pure-ish `planRun` and
-// a fs-touching `materializeRun` so the CLI can print the plan on --dry-run
-// and tests can assert both halves in-process.
+// Load an agent folder, plan its pi launch and optional nono profile, then
+// materialize generated files and packages before spawning.
 
 import { exists, mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { resolveAgentRef } from '../agent/aliases.js';
 import {
@@ -15,7 +11,7 @@ import {
   emitAgentBrowserNonoFallbackExtension
 } from '../agent/extensions/agent-browser-nono-fallback.js';
 import { emitProvidersExtension } from '../agent/extensions/providers.js';
-import { loadAgentFolder, type AgentFolder, type AgentNetwork, type SandboxBackend } from '../agent/folder.js';
+import { loadAgentFolder, type AgentFolder, type AgentNetwork } from '../agent/folder.js';
 import { composeArgv, type LaunchSpec } from '../agent/launch.js';
 import { emitPackagesManifest, resolvePackageEntries, type NpmPackageSpec } from '../agent/packages.js';
 import { loadSchedules, missingScheduleDirError, type Schedule } from '../agent/schedules.js';
@@ -23,18 +19,6 @@ import { stateDirFor, statePaths } from '../agent/state.js';
 import { getTerminalIntegrations, type TerminalIntegrations } from '../agent/terminal-integrations.js';
 import { resolveLinkedGitDir } from '../nono/linked-git-dir.js';
 import { AGENT_PROFILE_FILE, buildProfileJson, findDegenerateSandboxCwd } from '../nono/profiles.js';
-import {
-  composeSbxCreateArgv,
-  composeSbxExecArgv,
-  composeSbxMounts,
-  composeSbxPolicyArgvs,
-  composeSbxProvisionArgv,
-  isSbxAlreadyExistsError,
-  sbxGrantWarnings,
-  sbxNetworkWarnings,
-  sbxSandboxName,
-  type SbxSpec
-} from '../sbx/compose.js';
 import { installTree, readTextIfExists, type InstallContext, type TreeFile } from '../setup/install.js';
 import { requireBin, type WhichFn } from '../util/which.js';
 
@@ -46,8 +30,6 @@ export interface RunFlags {
   readonly allowHost?: readonly string[];
   /** Explicit CLI choice: `--no-sandbox` → true, `--sandbox` → false. Absent = defer to the folder. */
   readonly noSandbox?: boolean;
-  /** `--sandbox-backend` → explicit backend choice; implies the sandbox is on (still beaten by `--no-sandbox`). */
-  readonly sandboxBackend?: SandboxBackend;
   readonly dryRun?: boolean;
   readonly passthrough?: readonly string[];
   /** `--verbose` → show nono's full sandbox capabilities banner instead of the one-line status. */
@@ -70,8 +52,6 @@ interface RunDeps {
   readonly cwd?: string;
   readonly home?: string;
   readonly which?: WhichFn;
-  /** Whether stdout is a TTY (`cli.ts` passes `process.stdout.isTTY`) — rides the sbx exec argv as `-t`; default false. */
-  readonly tty?: boolean;
   /** Host terminal discovery environment; defaults to the inherited process environment. */
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly platform?: NodeJS.Platform;
@@ -99,24 +79,6 @@ export interface PackagesPlan {
   readonly installCommand: readonly string[];
 }
 
-/**
- * The sbx backend's materialization plan: the setup argvs `materializeRun`
- * runs before the final `sbx exec` (composed there, wrapping the pi argv).
- * `spec.piVersion` is null at plan time — the provision argv is recomposed at
- * materialize with the host pi version (see `MaterializeDeps.readPiVersion`)
- * so the guest install pins to it; the plan-time argv is the unpinned preview
- * dry-run prints, the same precedent as package `-e` entries, which also
- * resolve at materialize.
- */
-export interface SbxRunPlan {
-  readonly spec: SbxSpec;
-  /** Resolved host pi path — the version-pin source for guest provisioning; never spawned in-guest. */
-  readonly hostPiBin: string;
-  readonly createArgv: readonly string[];
-  readonly policyArgvs: ReadonlyArray<readonly string[]>;
-  readonly provisionArgv: readonly string[];
-}
-
 export interface RunPlan {
   /** Generated extensions, relative to `extensionsDir`. */
   readonly files: readonly TreeFile[];
@@ -130,10 +92,8 @@ export interface RunPlan {
   readonly extensionsDir: string;
   readonly sessionsDir: string;
   readonly warnings: readonly string[];
-  /** The generated per-agent nono profile to write before spawning; `null` unless the resolved backend is `'nono'`. */
+  /** The generated per-agent nono profile to write before spawning; `null` when sandboxing is disabled. */
   readonly profile: { readonly path: string; readonly content: string } | null;
-  /** The sbx setup plan (see `SbxRunPlan`); `null` unless the resolved backend is `'sbx'`. */
-  readonly sbx: SbxRunPlan | null;
   /** Settings.json `packages` resolved into an install plan; `null` when the folder declares none. */
   readonly packages: PackagesPlan | null;
   /** The single argv source: `composeArgv(plan.launch)` — package-entry-free until `materializeRun` recomposes it with resolved package entries. */
@@ -154,7 +114,7 @@ export interface RunPlan {
  * decides whether to print it (`--dry-run`) or materialize + spawn it.
  *
  * `--dry-run` only previews, so it deliberately skips the bin checks — you can
- * compose a command before nono/sbx/pi are installed.
+ * compose a command before nono/pi are installed.
  */
 export async function planRun(flags: RunFlags, deps: RunDeps = {}): Promise<RunPlan> {
   const home = deps.home ?? homedir();
@@ -167,14 +127,14 @@ export async function planRun(flags: RunFlags, deps: RunDeps = {}): Promise<RunP
   const { extensionsDir, sessionsDir, miseCacheDir } = statePaths(stateDir);
   const posture = resolvePosture(flags, folder);
   const dryRun = flags.dryRun ?? false;
-  const bins = resolveBins(posture.backend, dryRun, deps.which);
+  const bins = resolveBins(posture.sandbox, dryRun, deps.which);
   const launch = await buildLaunch({
     home,
     deps,
     folder,
     flags,
     passthrough: scheduled.passthrough,
-    backend: posture.backend,
+    sandbox: posture.sandbox,
     bins,
     stateDir,
     extensionsDir,
@@ -186,19 +146,15 @@ export async function planRun(flags: RunFlags, deps: RunDeps = {}): Promise<RunP
     cwd: scheduled.cwd,
     stateDir,
     profilePath: launch.profilePath,
-    terminalIntegrations: launch.terminalIntegrations,
-    sbxBin: bins.sbxBin,
-    hostPiBin: bins.piBin,
-    tty: deps.tty ?? false
+    terminalIntegrations: launch.terminalIntegrations
   });
   const packages = buildPackagesPlan(folder, stateDir);
   return {
-    files: emitExtensionFiles(folder, posture.backend),
+    files: emitExtensionFiles(folder, posture.sandbox),
     extensionsDir,
     sessionsDir,
-    warnings: [...refWarnings, ...scheduled.warnings, ...posture.warnings, ...isolation.warnings],
-    profile: isolation.profile,
-    sbx: isolation.sbx,
+    warnings: [...refWarnings, ...scheduled.warnings, ...posture.warnings],
+    profile: isolation,
     packages,
     launch,
     cwd: scheduled.cwd,
@@ -280,7 +236,7 @@ interface LaunchContext {
   readonly flags: RunFlags;
   /** The resolved passthrough — `flags.passthrough` plain, or with a `--schedule` invocation appended (see `resolveScheduledRun`). */
   readonly passthrough: readonly string[];
-  readonly backend: SandboxBackend | null;
+  readonly sandbox: boolean;
   readonly bins: ResolvedBins;
   readonly stateDir: string;
   readonly extensionsDir: string;
@@ -294,13 +250,12 @@ interface PlannedLaunch extends LaunchSpec {
 
 /** Resolve the generated-extension paths and profile path into the `LaunchSpec` `composeArgv` consumes. */
 async function buildLaunch(ctx: LaunchContext): Promise<PlannedLaunch> {
-  const { folder, flags, passthrough, backend, bins, stateDir, extensionsDir, sessionsDir, miseCacheDir } = ctx;
+  const { folder, flags, passthrough, sandbox, bins, stateDir, extensionsDir, sessionsDir, miseCacheDir } = ctx;
   return {
     terminalIntegrations: await getTerminalIntegrations({
       home: ctx.home,
       env: ctx.deps.env ?? process.env,
       platform: ctx.deps.platform ?? process.platform,
-      backend,
       enabled: flags.schedule === undefined
     }),
     folder,
@@ -308,12 +263,10 @@ async function buildLaunch(ctx: LaunchContext): Promise<PlannedLaunch> {
     extensionsDir,
     sessionsDir,
     miseCacheDir,
-    backend,
+    sandbox,
     passthrough,
     nonoBin: bins.nonoBin,
-    // The guest resolves `pi` on its own PATH (provisioning installed it
-    // there); the host's resolved path is meaningless inside the microVM.
-    piBin: backend === 'sbx' ? 'pi' : bins.piBin,
+    piBin: bins.piBin,
     profilePath: join(stateDir, AGENT_PROFILE_FILE),
     ...(flags.verbose ? { verbose: true } : {})
   };
@@ -332,38 +285,32 @@ function buildPackagesPlan(folder: AgentFolder, stateDir: string): PackagesPlan 
 }
 
 interface ResolvedPosture {
-  readonly backend: SandboxBackend | null;
+  readonly sandbox: boolean;
   readonly network: AgentNetwork | undefined;
   readonly warnings: readonly string[];
 }
 
-/** Resolve the backend decision and the network posture together, with their combined warnings. */
+/** Resolve sandbox enablement and the network posture together, with their combined warnings. */
 function resolvePosture(flags: RunFlags, folder: AgentFolder): ResolvedPosture {
-  const { backend, warnings } = resolveBackend(flags, folder);
+  const { sandbox, warnings } = resolveSandbox(flags, folder);
   const networkWarnings: string[] = [];
-  const network = resolveNetwork(flags, folder, backend, networkWarnings);
+  const network = resolveNetwork(flags, folder, networkWarnings);
   return {
-    backend,
+    sandbox,
     network,
-    warnings: withUnsandboxedNetworkWarning(backend !== null, network, [...warnings, ...networkWarnings])
+    warnings: withUnsandboxedNetworkWarning(sandbox, network, [...warnings, ...networkWarnings])
   };
 }
 
 /**
- * Precedence: `--offline` > `--allow-host` > the resolved backend's own
- * sandbox file `network` > open default. CLI flags REPLACE the folder network
+ * Precedence: `--offline` > `--allow-host` > sandbox/nono.json network > open default. CLI flags REPLACE the folder network
  * (no merge) so the effective posture is always unambiguous.
  */
-function resolveNetwork(
-  flags: RunFlags,
-  folder: AgentFolder,
-  backend: SandboxBackend | null,
-  warnings: string[]
-): AgentNetwork | undefined {
+function resolveNetwork(flags: RunFlags, folder: AgentFolder, warnings: string[]): AgentNetwork | undefined {
   if (flags.offline) return { block: true };
   const allowHost = readCliHostList(flags.allowHost ?? [], warnings);
   if (allowHost.length > 0) return { allowDomain: allowHost };
-  return backend === 'sbx' ? folder.sbx.network : folder.sandbox.network;
+  return folder.sandbox.network;
 }
 
 /**
@@ -401,102 +348,37 @@ function hasRestrictiveNetworkFlags(flags: RunFlags): boolean {
   return flags.offline === true || (flags.allowHost?.length ?? 0) > 0;
 }
 
-interface ResolvedBackend {
-  readonly backend: SandboxBackend | null;
-  readonly warnings: readonly string[];
-}
-
-/**
- * Resolve which sandbox backend runs. Precedence: `--no-sandbox` (off) >
- * `--sandbox-backend <b>` (that backend, forced on) > `--sandbox` (folder
- * preference, default nono) > the folder's declared postures > restrictive
- * network flags force nono on > unsandboxed default with the loud
- * no-isolation warning.
- */
-function resolveBackend(flags: RunFlags, folder: AgentFolder): ResolvedBackend {
-  if (flags.noSandbox === true) return { backend: null, warnings: folder.warnings };
-  // An explicit backend choice resolves any folder tie itself — the tie-break
-  // warning (which names this very flag as the override) would be noise here.
-  if (flags.sandboxBackend !== undefined) return { backend: flags.sandboxBackend, warnings: folder.warnings };
-  const preference = folderBackendPreference(folder);
-  if (flags.noSandbox === false || preference.backend !== null) {
-    return { ...preference, backend: preference.backend ?? 'nono' };
+/** CLI sandbox overrides take precedence over the folder posture. */
+function resolveSandbox(flags: RunFlags, folder: AgentFolder): Pick<ResolvedPosture, 'sandbox' | 'warnings'> {
+  if (flags.noSandbox === true) return { sandbox: false, warnings: folder.warnings };
+  if (flags.noSandbox === false || folder.sandbox.posture === 'enabled') {
+    return { sandbox: true, warnings: folder.warnings };
   }
-  return resolveUnconfiguredBackend(flags, folder, preference.warnings);
-}
-
-/**
- * The folder's declared backend: nono wins when both files enable a sandbox —
- * the host-fidelity default, overridable with `--sandbox-backend sbx` — with a
- * warning so the tie-break is never silent.
- */
-function folderBackendPreference(folder: AgentFolder): ResolvedBackend {
-  const nonoOn = folder.sandbox.posture === 'enabled';
-  const sbxOn = folder.sbx.posture === 'enabled';
-  if (nonoOn && sbxOn) {
-    return {
-      backend: 'nono',
-      warnings: [
-        ...folder.warnings,
-        'both sandbox/nono.json and sandbox/sbx.json declare a sandbox — using nono (pass --sandbox-backend sbx to override)'
-      ]
-    };
-  }
-  return { backend: nonoOn ? 'nono' : sbxOn ? 'sbx' : null, warnings: folder.warnings };
-}
-
-/** No file turned a backend on: restrictive network flags force one anyway (nono, the host-fidelity default); otherwise unsandboxed, loudly. */
-function resolveUnconfiguredBackend(
-  flags: RunFlags,
-  folder: AgentFolder,
-  warnings: readonly string[]
-): ResolvedBackend {
-  const reason = unsandboxedReason(folder);
+  const reason =
+    folder.sandbox.posture === 'disabled' ? 'sandbox disabled by sandbox/nono.json' : 'sandbox/nono.json not found';
   if (hasRestrictiveNetworkFlags(flags)) {
     return {
-      backend: 'nono',
+      sandbox: true,
       warnings: [
-        ...warnings,
+        ...folder.warnings,
         `${reason} — sandbox forced on to enforce the requested network policy (--no-sandbox to override)`
       ]
     };
   }
   return {
-    backend: null,
-    warnings: [...warnings, `${reason} — agent is running without OS isolation (--sandbox to force enable)`]
+    sandbox: false,
+    warnings: [...folder.warnings, `${reason} — agent is running without OS isolation (--sandbox to force enable)`]
   };
-}
-
-/**
- * Which file (if any) turned the backend off, for the unsandboxed warning. A
- * disabled file wins over the not-found message so the warning names the
- * deliberate opt-out rather than implying nothing was configured.
- */
-function unsandboxedReason(folder: AgentFolder): string {
-  if (folder.sandbox.posture === 'disabled') return 'sandbox disabled by sandbox/nono.json';
-  if (folder.sbx.posture === 'disabled') return 'sandbox disabled by sandbox/sbx.json';
-  return 'sandbox/nono.json or sbx.json not found';
-}
-
-export interface SbxRunResult {
-  readonly exitCode: number;
-  readonly stderr: string;
 }
 
 export interface MaterializeDeps {
   /** Runs a package install (e.g. `npm install`) in `cwd`; `cli.ts` always passes `runInstall` from `util/proc.js`. */
   readonly install?: (command: readonly string[], cwd: string) => Promise<void>;
-  /** Runs one sbx setup command (create/policy/provision), capturing stderr; `cli.ts` passes `runCapture` from `util/proc.js`. */
-  readonly run?: (argv: readonly string[]) => Promise<SbxRunResult>;
-  /** Reads the host pi version (`cli.ts` passes its `--version` reader) to pin the guest install; absent → unpinned provisioning. */
-  readonly readPiVersion?: (piBin: string) => Promise<string | null>;
 }
 
 /**
  * Write the generated extensions (replacing stale ones), ensure the sessions
- * dir, and — per backend — (re)write the generated per-agent nono profile
- * that `nono run --profile` points at, or run the sbx setup sequence
- * (create/policy/provision) and wrap the final argv in `sbx exec`. When the
+ * dir, and (re)write the generated per-agent nono profile when sandboxed. When the
  * folder declares `packages`, also (re)install the per-agent npm project and
  * resolve each package's pi extension entries, returning the final argv with
  * those entries appended as `-e` flags plus any resolution warnings;
@@ -519,55 +401,15 @@ export async function materializeRun(
     await mkdir(dirname(plan.profile.path), { recursive: true });
     await writeFile(plan.profile.path, plan.profile.content, 'utf8');
   }
-  if (plan.sbx !== null) await runSbxSetup(plan.sbx, deps);
   // `plan.extensionsDir`/`plan.sessionsDir` are authoritative (see `RunPlan`
   // docs): re-assert them onto `launch` here so a plan whose dirs were
   // overridden after `planRun` still gets a composed argv that agrees with
   // what was actually written to disk above, instead of whatever `launch` had
   // baked in at `planRun` time.
   const launch: LaunchSpec = { ...plan.launch, extensionsDir: plan.extensionsDir, sessionsDir: plan.sessionsDir };
-  const result =
-    plan.packages === null
-      ? { argv: composeArgv(launch), warnings: [] }
-      : await installAndResolvePackages(plan.packages, launch, deps);
-  if (plan.sbx === null) return result;
-  return { argv: composeSbxExecArgv(plan.sbx.spec, result.argv), warnings: result.warnings };
-}
-
-/**
- * Run the sbx setup sequence: create (a name collision is attach, not failure
- * — the mount-set-hashed name guarantees an existing sandbox already has this
- * run's exact mounts), then the idempotent per-sandbox policy rules, then
- * provisioning — recomposed with the host pi version when `readPiVersion` is
- * provided so the guest install pins to it.
- */
-async function runSbxSetup(sbx: SbxRunPlan, deps: MaterializeDeps): Promise<void> {
-  const run = deps.run;
-  if (run === undefined) throw new Error('An sbx-backend run needs a command runner but none was provided');
-  const created = await run(sbx.createArgv);
-  if (created.exitCode !== 0 && !isSbxAlreadyExistsError(created.stderr)) {
-    throw new Error(`Failed to create sbx sandbox ${sbx.spec.name}: ${created.stderr.trim()}`);
-  }
-  for (const argv of sbx.policyArgvs) {
-    await runSbxStep(run, argv, `apply sbx network policy (${sbx.spec.name})`);
-  }
-  await runSbxStep(run, await resolveProvisionArgv(sbx, deps), `provision pi in sbx sandbox ${sbx.spec.name}`);
-}
-
-async function runSbxStep(
-  run: NonNullable<MaterializeDeps['run']>,
-  argv: readonly string[],
-  what: string
-): Promise<void> {
-  const result = await run(argv);
-  if (result.exitCode !== 0) throw new Error(`Failed to ${what}: ${result.stderr.trim()}`);
-}
-
-/** Pin the guest pi install to the host's version when the reader dep is present; the plan-time (unpinned) argv otherwise. */
-async function resolveProvisionArgv(sbx: SbxRunPlan, deps: MaterializeDeps): Promise<readonly string[]> {
-  if (deps.readPiVersion === undefined) return sbx.provisionArgv;
-  const piVersion = await deps.readPiVersion(sbx.hostPiBin);
-  return composeSbxProvisionArgv({ ...sbx.spec, piVersion });
+  return plan.packages === null
+    ? { argv: composeArgv(launch), warnings: [] }
+    : await installAndResolvePackages(plan.packages, launch, deps);
 }
 
 /** Skip a reinstall when the manifest is unchanged and `node_modules` already exists — npm install is not free. */
@@ -605,25 +447,13 @@ async function installAndResolvePackages(
 interface ResolvedBins {
   readonly nonoBin: string;
   readonly piBin: string;
-  readonly sbxBin: string;
 }
 
-/**
- * Verify the required bins and resolve their spawn paths. Only the active
- * backend's wrapper bin is required — `nono` for `'nono'`, `sbx` for `'sbx'`
- * — while `pi` is required on every run: it spawns directly when unsandboxed
- * and under nono (resolved path, mise-shim fallback included — see
- * `util/which.ts` and `LaunchSpec.piBin`), and under sbx its resolved host
- * path sources the guest version pin (see `MaterializeDeps.readPiVersion`)
- * even though the guest spawns its own PATH-resolved `pi`. `--dry-run` only
- * previews, so it deliberately skips the checks — you can compose a command
- * before the bins are installed.
- */
-function resolveBins(backend: SandboxBackend | null, dryRun: boolean, which?: WhichFn): ResolvedBins {
-  if (dryRun) return { nonoBin: 'nono', piBin: 'pi', sbxBin: 'sbx' };
+/** Resolve pi and, when sandboxed, nono; dry-run needs no installed binaries. */
+function resolveBins(sandbox: boolean, dryRun: boolean, which?: WhichFn): ResolvedBins {
+  if (dryRun) return { nonoBin: 'nono', piBin: 'pi' };
   return {
-    nonoBin: backend === 'nono' ? requireBin('nono', which) : 'nono',
-    sbxBin: backend === 'sbx' ? requireBin('sbx', which) : 'sbx',
+    nonoBin: sandbox ? requireBin('nono', which) : 'nono',
     piBin: requireBin('pi', which)
   };
 }
@@ -633,88 +463,19 @@ interface IsolationContext {
   readonly cwd: string;
   readonly stateDir: string;
   readonly profilePath: string;
-  readonly sbxBin: string;
-  readonly hostPiBin: string;
-  readonly tty: boolean;
   readonly terminalIntegrations: TerminalIntegrations;
 }
 
-interface IsolationPlan {
-  readonly profile: { readonly path: string; readonly content: string } | null;
-  readonly sbx: SbxRunPlan | null;
-  readonly warnings: readonly string[];
-}
-
-/**
- * The backend-specific halves of the plan: the generated nono profile, or the
- * sbx create/policy/provision argvs plus the sbx warn-and-drop disclosures
- * (nono-only grants and network keys the VM boundary cannot honor). The
- * linked-git-dir resolution is shared — both backends need the real git dir
- * reachable when cwd is a worktree/submodule checkout: a profile grant on
- * nono, an extra rw mount on sbx.
- */
 async function buildIsolation(
   posture: ResolvedPosture,
   folder: AgentFolder,
   ctx: IsolationContext
-): Promise<IsolationPlan> {
-  const linkedGitDir = posture.backend !== null ? await resolveLinkedGitDir(ctx.cwd) : undefined;
-  const profile = sandboxPlan(posture.backend === 'nono', folder, posture.network, {
-    home: ctx.home,
-    cwd: ctx.cwd,
-    stateDir: ctx.stateDir,
-    profilePath: ctx.profilePath,
-    terminalIntegrations: ctx.terminalIntegrations,
-    ...(linkedGitDir !== undefined ? { linkedGitDir } : {})
-  });
-  if (posture.backend !== 'sbx') return { profile, sbx: null, warnings: [] };
-  const sbx = buildSbxPlan(posture.network, folder, {
+): Promise<RunPlan['profile']> {
+  const linkedGitDir = posture.sandbox ? await resolveLinkedGitDir(ctx.cwd) : undefined;
+  return sandboxPlan(posture.sandbox, folder, posture.network, {
     ...ctx,
     ...(linkedGitDir !== undefined ? { linkedGitDir } : {})
   });
-  return {
-    profile,
-    sbx,
-    warnings: [...sbxNetworkWarnings(posture.network), ...sbxGrantWarnings(folder.sbx.filesystem)]
-  };
-}
-
-interface SbxPlanContext extends IsolationContext {
-  readonly linkedGitDir?: string;
-}
-
-/**
- * Compose the sbx setup plan from the folder's `sandbox/sbx.json` grants: the
- * mount set (cwd, agent dir, state dir, `~/.pi/agent`, linked git dir,
- * grants), the mount-set-hashed sandbox name, and the create/policy/provision
- * argvs — see `sbx/compose.ts` for each composition's contract.
- */
-function buildSbxPlan(network: AgentNetwork | undefined, folder: AgentFolder, ctx: SbxPlanContext): SbxRunPlan {
-  const mounts = composeSbxMounts({
-    cwd: ctx.cwd,
-    agentDir: folder.dir,
-    stateDir: ctx.stateDir,
-    home: ctx.home,
-    grants: folder.sbx.filesystem,
-    ...(ctx.linkedGitDir !== undefined ? { linkedGitDir: ctx.linkedGitDir } : {})
-  });
-  const spec: SbxSpec = {
-    sbxBin: ctx.sbxBin,
-    name: sbxSandboxName(basename(ctx.stateDir), mounts),
-    cwd: ctx.cwd,
-    home: ctx.home,
-    mounts,
-    ...(network !== undefined ? { network } : {}),
-    piVersion: null,
-    tty: ctx.tty
-  };
-  return {
-    spec,
-    hostPiBin: ctx.hostPiBin,
-    createArgv: composeSbxCreateArgv(spec),
-    policyArgvs: composeSbxPolicyArgvs(spec),
-    provisionArgv: composeSbxProvisionArgv(spec)
-  };
 }
 
 /**
@@ -723,14 +484,12 @@ function buildSbxPlan(network: AgentNetwork | undefined, folder: AgentFolder, ct
  * silent by default (`--silent` is passed to nono); `--verbose` shows nono's
  * capabilities banner (grants + network mode), and the generated profile file
  * is the complete audit surface (seatbelt rules never appear in the banner
- * even with `--verbose`). Returns `null` for other backends, which need no
- * profile.
+ * even with `--verbose`). Returns `null` when sandboxing is disabled.
  *
  * Fails fast on a degenerate cwd (see `findDegenerateSandboxCwd`) before
  * baking it in as the profile's cwd `allow` grant: nono itself refuses to
  * start when a grant overlaps its protected state root, and that refusal is
  * opaque — a cradle-level error here names the offending directory instead.
- * The sbx guest cannot overlap nono's state root, so the check is nono-only.
  */
 function sandboxPlan(
   sandbox: boolean,
@@ -769,17 +528,17 @@ function sandboxPlan(
   return { path: ctx.profilePath, content };
 }
 
-function emitExtensionFiles(folder: AgentFolder, backend: SandboxBackend | null): TreeFile[] {
+function emitExtensionFiles(folder: AgentFolder, sandbox: boolean): TreeFile[] {
   return [
     ...(folder.providersJson !== null
       ? [
           {
             rel: 'providers.ts',
-            content: emitProvidersExtension(folder.providersJson, { rewriteLocalhostBaseUrls: backend === 'sbx' })
+            content: emitProvidersExtension(folder.providersJson)
           }
         ]
       : []),
-    ...(backend === 'nono'
+    ...(sandbox
       ? [
           {
             rel: AGENT_BROWSER_NONO_FALLBACK_EXTENSION_FILE,

@@ -15,10 +15,9 @@ import {
   type ScheduleFlags,
   type SchedulePlan
 } from './commands/schedule.js';
-import { composeSbxExecArgv } from './sbx/compose.js';
 import { quoteCommandPart } from './setup/utils.js';
 import { styleWarning } from './util/style.js';
-import { runCapture, runCaptureAll, runForeground, runInstall } from './util/proc.js';
+import { runCaptureAll, runForeground, runInstall } from './util/proc.js';
 
 const cli = yargs(process.argv.slice(2))
   .scriptName('cradle')
@@ -41,7 +40,7 @@ cli.command(
 
 cli.command(
   'run [dir]',
-  'run an agent folder with pi, sandboxed when sandbox/nono.json or sandbox/sbx.json is present',
+  'run an agent folder with pi, sandboxed when sandbox/nono.json is present',
   builder =>
     builder
       .positional('dir', {
@@ -63,12 +62,6 @@ cli.command(
         description:
           'run sandboxed (--sandbox forces it when no sandbox/ file enables one or the folder opts out; --no-sandbox disables)'
       })
-      .option('sandbox-backend', {
-        type: 'string',
-        choices: ['nono', 'sbx'] as const,
-        description:
-          'sandbox implementation (implies --sandbox): nono (host OS policy) or sbx (Docker Sandboxes microVM)'
-      })
       .option('verbose', {
         type: 'boolean',
         default: false,
@@ -87,7 +80,6 @@ cli.command(
       dir: argv.dir,
       dryRun: argv.dryRun,
       ...(argv.sandbox !== undefined ? { noSandbox: !argv.sandbox } : {}),
-      ...(argv.sandboxBackend !== undefined ? { sandboxBackend: argv.sandboxBackend } : {}),
       ...(argv.offline ? { offline: true } : {}),
       ...(allowHost.length ? { allowHost } : {}),
       ...(argv.verbose ? { verbose: true } : {}),
@@ -159,20 +151,17 @@ cli.command(
 // yargs handler would print the full usage dump plus a stack trace instead.
 async function executeRun(flags: RunFlags): Promise<void> {
   try {
-    const plan = await planRun(flags, { tty: process.stdout.isTTY });
+    const plan = await planRun(flags);
     printWarnings(plan.warnings);
     if (plan.dryRun) {
       printDryRun(plan);
       return;
     }
     const result = await materializeRun(plan, {
-      install: runInstall,
-      run: runCapture,
-      readPiVersion: readBinVersion
+      install: runInstall
     });
     printWarnings(result.warnings);
     if (plan.profile !== null && !flags.verbose) console.log('🔒 Sandbox Active');
-    if (plan.sbx !== null && !flags.verbose) console.log('🔒 Sandbox Active (sbx)');
     process.exit(await runForeground(result.argv, composeEnv(plan.launch), plan.cwd));
   } catch (err) {
     reportError(err);
@@ -220,26 +209,14 @@ function printScheduleDryRun(plan: SchedulePlan): void {
 function printDryRun(plan: RunPlan): void {
   for (const file of plan.files) console.log(`write: ${join(plan.extensionsDir, file.rel)}`);
   if (plan.profile !== null) console.log(`write: ${plan.profile.path}`);
-  if (plan.sbx !== null) printSbxPlan(plan.sbx);
   if (plan.packages !== null) printPackagesPlan(plan.packages);
   console.log(`cwd: ${plan.cwd}`);
   // The dry-run print is an audit surface, so it must disclose the spawn env
   // too (host mise and terminal overrides, see `agent/launch.ts`'s `composeEnv`)
   // — not just the argv.
   const envPrefix = Object.entries(composeEnv(plan.launch)).map(([key, value]) => `${key}=${quoteCommandPart(value)}`);
-  const argv =
-    plan.sbx !== null ? composeSbxExecArgv(plan.sbx.spec, composeArgv(plan.launch)) : composeArgv(plan.launch);
+  const argv = composeArgv(plan.launch);
   console.log([...envPrefix, ...argv.map(quoteCommandPart)].join(' '));
-}
-
-// The sbx setup sequence is part of the audit surface too — every command
-// materialize will run, in order. Provision prints unpinned; materialize
-// re-pins it to the host pi version (same precedent as the package `-e`
-// entries below, which also resolve after the preview prints).
-function printSbxPlan(sbx: NonNullable<RunPlan['sbx']>): void {
-  console.log(`create: ${sbx.createArgv.map(quoteCommandPart).join(' ')}`);
-  for (const argv of sbx.policyArgvs) console.log(`policy: ${argv.map(quoteCommandPart).join(' ')}`);
-  console.log(`provision: ${sbx.provisionArgv.map(quoteCommandPart).join(' ')}`);
 }
 
 // Dry-run never installs; the printed argv legitimately omits the package `-e`
@@ -258,14 +235,13 @@ function printWarnings(warnings: readonly string[]): void {
 /**
  * Read a bin's version output, normalized to a bare version string. Bins
  * report differently — `pi` prints a bare `0.80.10`, `nono` prints
- * `nono 0.68.0`, and `sbx` (no `--version` flag at all; callers pass
- * `['version']`) prints `sbx version: v0.35.0 <sha>` — so extract the first
+ * `nono 0.68.0` — so extract the first
  * version-shaped token from the first line rather than assuming a prefix.
  * Returns `null` on spawn failure, non-zero exit, or no match.
  */
-async function readBinVersion(binPath: string, args: readonly string[] = ['--version']): Promise<string | null> {
+async function readBinVersion(binPath: string): Promise<string | null> {
   try {
-    const proc = Bun.spawn([binPath, ...args], { stdout: 'pipe', stderr: 'ignore' });
+    const proc = Bun.spawn([binPath, '--version'], { stdout: 'pipe', stderr: 'ignore' });
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     if (exitCode !== 0) return null;
     return stdout.split('\n')[0]?.match(/v?\d+\.\d+\S*/)?.[0] ?? null;

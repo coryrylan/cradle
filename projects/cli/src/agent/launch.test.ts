@@ -18,11 +18,6 @@ function createFolder(overrides: Partial<AgentFolder> = {}): AgentFolder {
       filesystem: { read: [], write: [], allow: [], unixSocket: [], unixSocketDirBind: [] },
       unsafeMacosSeatbeltRules: []
     },
-    sbx: {
-      posture: 'unconfigured',
-      filesystem: { read: [], write: [], allow: [], unixSocket: [], unixSocketDirBind: [] },
-      unsafeMacosSeatbeltRules: []
-    },
     warnings: [],
     ...overrides
   };
@@ -35,7 +30,7 @@ function createSpec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
     extensionsDir: '/state/helper/extensions',
     sessionsDir: '/state/helper/sessions',
     miseCacheDir: '/state/helper/mise-cache',
-    backend: null,
+    sandbox: false,
     passthrough: [],
     nonoBin: 'nono',
     piBin: 'pi',
@@ -53,7 +48,7 @@ describe('composePiArgv', () => {
         extensionFiles: ['/agents/helper/extensions/flip.ts', '/agents/helper/extensions/hooks/index.ts'],
         providersJson: '/agents/helper/models.json'
       }),
-      backend: 'nono',
+      sandbox: true,
       passthrough: ['-p', 'hi']
     });
     expect(composePiArgv(spec)).toEqual([
@@ -91,14 +86,14 @@ describe('composePiArgv', () => {
     const sandboxed = composePiArgv(
       createSpec({
         folder: createFolder({ extensionFiles, providersJson: '/agents/helper/models.json' }),
-        backend: 'nono',
+        sandbox: true,
         extensionsDir: '/ext'
       })
     );
     expect(sandboxed.indexOf('/agents/helper/extensions/flip.ts')).toBeGreaterThan(
       sandboxed.indexOf('/ext/providers.ts')
     );
-    const bare = composePiArgv(createSpec({ folder: createFolder({ extensionFiles }), backend: null }));
+    const bare = composePiArgv(createSpec({ folder: createFolder({ extensionFiles }), sandbox: false }));
     expect(bare[bare.indexOf('-e') + 1]).toBe('/agents/helper/extensions/flip.ts');
   });
 
@@ -148,7 +143,7 @@ describe('composePiArgv', () => {
     const argv = composePiArgv(
       createSpec({
         folder: createFolder({ providersJson: '/agents/helper/models.json' }),
-        backend: 'nono',
+        sandbox: true,
         extensionsDir: '/ext'
       })
     );
@@ -156,19 +151,14 @@ describe('composePiArgv', () => {
   });
 
   it('should load the agent-browser nono fallback only on nono-backed runs', () => {
-    const nonoBacked = composePiArgv(createSpec({ backend: 'nono', extensionsDir: '/generated' }));
+    const nonoBacked = composePiArgv(createSpec({ sandbox: true, extensionsDir: '/generated' }));
     expect(nonoBacked).toContain('/generated/agent-browser-nono-fallback.ts');
-    const unsandboxed = composePiArgv(createSpec({ backend: null, extensionsDir: '/generated' }));
+    const unsandboxed = composePiArgv(createSpec({ sandbox: false, extensionsDir: '/generated' }));
     expect(unsandboxed).not.toContain('/generated/agent-browser-nono-fallback.ts');
   });
 
-  it('should omit the agent-browser nono fallback for the sbx backend', () => {
-    const argv = composePiArgv(createSpec({ backend: 'sbx', extensionsDir: '/generated' }));
-    expect(argv).not.toContain('/generated/agent-browser-nono-fallback.ts');
-  });
-
   it('should add no -e flags when no providers, packages, or agent extensions are present unsandboxed', () => {
-    const argv = composePiArgv(createSpec({ backend: null }));
+    const argv = composePiArgv(createSpec({ sandbox: false }));
     expect(argv).not.toContain('-e');
   });
 
@@ -185,7 +175,7 @@ describe('composePiArgv', () => {
     const argv = composePiArgv(
       createSpec({
         folder,
-        backend: 'nono',
+        sandbox: true,
         extensionsDir: '/ext',
         packageEntries: ['/state/helper/npm/node_modules/pi-example-tool/index.ts']
       })
@@ -233,23 +223,15 @@ describe('composePiArgv', () => {
 });
 
 describe('composeArgv', () => {
-  it('should return the bare pi argv when unsandboxed (backend null)', () => {
-    const spec = createSpec({ backend: null, passthrough: ['-p', 'hi'] });
+  it('should return the bare pi argv when unsandboxed', () => {
+    const spec = createSpec({ sandbox: false, passthrough: ['-p', 'hi'] });
     const argv = composeArgv(spec);
     expect(argv).toEqual(composePiArgv(spec));
     expect(argv[0]).toBe('pi');
   });
 
-  it('should return the bare pi argv for the sbx backend — sbx exec wraps later, at start.ts materialization', () => {
-    const spec = createSpec({ backend: 'sbx', passthrough: ['-p', 'hi'] });
-    const argv = composeArgv(spec);
-    expect(argv).toEqual(composePiArgv(spec));
-    expect(argv).not.toContain('nono');
-    expect(argv).not.toContain('run');
-  });
-
-  it('should wrap pi in nono run pointing at the generated per-agent profile when backend is nono, with --silent by default', () => {
-    const spec = createSpec({ backend: 'nono' });
+  it('should wrap pi in nono run pointing at the generated per-agent profile when sandboxed, with --silent by default', () => {
+    const spec = createSpec({ sandbox: true });
     // Grants no longer ride as flags — they live inside the profile file (see nono/profiles.ts).
     // --silent suppresses nono's startup banner by default.
     expect(composeArgv(spec)).toEqual([
@@ -264,14 +246,14 @@ describe('composeArgv', () => {
   });
 
   it('should omit --silent when verbose is true', () => {
-    const spec = createSpec({ backend: 'nono', verbose: true });
+    const spec = createSpec({ sandbox: true, verbose: true });
     const argv = composeArgv(spec);
     expect(argv).not.toContain('--silent');
     expect(argv.slice(0, 4)).toEqual(['nono', 'run', '--profile', '/state/helper/nono-profile.json']);
   });
 
   it('should not carry any per-flag network posture — network lives in the profile now', () => {
-    const argv = composeArgv(createSpec({ backend: 'nono' }));
+    const argv = composeArgv(createSpec({ sandbox: true }));
     expect(argv).not.toContain('--block-net');
     // The wrapper is exactly `nono run --silent --profile <file> --` plus the pi argv.
     expect(argv.slice(0, 5)).toEqual(['nono', 'run', '--silent', '--profile', '/state/helper/nono-profile.json']);
@@ -281,7 +263,7 @@ describe('composeArgv', () => {
   it('should spawn the resolved nono and pi paths, not bare names, once both are resolved', () => {
     const argv = composeArgv(
       createSpec({
-        backend: 'nono',
+        sandbox: true,
         nonoBin: '/home/u/.local/share/mise/shims/nono',
         piBin: '/home/u/.local/share/mise/shims/pi'
       })
@@ -291,27 +273,18 @@ describe('composeArgv', () => {
   });
 
   it('should use the resolved pi path for an unsandboxed spawn, not the bare name', () => {
-    const argv = composeArgv(createSpec({ backend: null, piBin: '/home/u/.local/share/mise/shims/pi' }));
+    const argv = composeArgv(createSpec({ sandbox: false, piBin: '/home/u/.local/share/mise/shims/pi' }));
     expect(argv[0]).toBe('/home/u/.local/share/mise/shims/pi');
-  });
-
-  it('should use the literal bare pi for the sbx backend — resolved on the guest PATH, not the host', () => {
-    const argv = composeArgv(createSpec({ backend: 'sbx', piBin: 'pi' }));
-    expect(argv[0]).toBe('pi');
   });
 });
 
 describe('composeEnv', () => {
-  it('should point MISE_CACHE_DIR at the spec miseCacheDir when backend is nono', () => {
-    const spec = createSpec({ backend: 'nono', miseCacheDir: '/state/helper/mise-cache' });
+  it('should point MISE_CACHE_DIR at the spec miseCacheDir when sandboxed', () => {
+    const spec = createSpec({ sandbox: true, miseCacheDir: '/state/helper/mise-cache' });
     expect(composeEnv(spec)).toEqual({ MISE_CACHE_DIR: '/state/helper/mise-cache' });
   });
 
   it('should return no env entries when unsandboxed, keeping the shared host mise cache', () => {
-    expect(composeEnv(createSpec({ backend: null }))).toEqual({});
-  });
-
-  it('should return no env entries for the sbx backend — the guest has no mise', () => {
-    expect(composeEnv(createSpec({ backend: 'sbx', miseCacheDir: '/state/helper/mise-cache' }))).toEqual({});
+    expect(composeEnv(createSpec({ sandbox: false }))).toEqual({});
   });
 });
