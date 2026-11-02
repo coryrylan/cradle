@@ -38,6 +38,7 @@ my-agent/
   APPEND_SYSTEM.md   required*  append to pi's system prompt (role + instructions)
   settings.json      optional   pi-native settings (model selection, packages)
   models.json        optional   pi-native custom provider definitions
+  mcp.json           optional   pi-native MCP server definitions
   skills/            optional   markdown playbooks, loaded when relevant
   extensions/        optional   pi extensions: custom tools, commands, hooks
   sandbox/           optional   sandbox posture (nono.json)
@@ -67,6 +68,8 @@ bun run lint:knip    # knip across all workspaces (unused files / deps / exports
 ```
 
 Package-scoped scripts (`build`, `test`, `lint`, …) run inside the package — e.g. `cd projects/cli && bun run build`. See each package's `README.md` and the root [`AGENTS.md`](./AGENTS.md) for details.
+
+MCP servers can be declared in an agent’s `mcp.json`. Cradle enables Pi’s MCP built-ins and registers those servers at launch. See [`examples/mcp`](./examples/mcp) and the [folder format](./ARCHITECTURE.md#mcpjson).
 
 ## License
 

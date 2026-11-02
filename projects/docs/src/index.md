@@ -14,6 +14,7 @@ my-agent/
   skills/             optional   markdown playbooks, loaded when relevant
   settings.json       optional   pi-native settings (model selection)
   models.json         optional   pi-native custom provider definitions
+  mcp.json           optional   pi-native MCP server definitions
   SYSTEM.md           required   system prompt (role + instructions)
 ```
 

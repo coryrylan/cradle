@@ -3,6 +3,7 @@
 import { join } from 'node:path';
 
 import { AGENT_BROWSER_NONO_FALLBACK_EXTENSION_FILE } from './extensions/agent-browser-nono-fallback.js';
+import { MCP_EXTENSION_FILE } from './extensions/mcp.js';
 import type { AgentFolder } from './folder.js';
 import type { TerminalIntegrations } from './terminal-integrations.js';
 
@@ -76,8 +77,9 @@ function composeSystemPromptArgs(folder: AgentFolder): string[] {
 
 /**
  * Build the bare pi argv. `passthrough` lands last so user-passed flags win
- * under pi's last-wins parsing. The `-e` order is load-bearing: the generated
- * providers extension goes first, followed by the nono-only agent-browser
+ * under pi's last-wins parsing. The `-e` order is load-bearing:
+ * MCP built-ins load explicitly because --no-extensions disables them too.
+ * Generated providers and MCP registrations precede the nono-only agent-browser
  * host-socket fallback, installed host terminal hooks, resolved package entries,
  * then the agent's own
  * `extensions/` files — which load with the agent's providers registered,
@@ -92,9 +94,11 @@ export function composePiArgv(spec: LaunchSpec): string[] {
     ...composeSystemPromptArgs(folder),
     '--no-extensions',
     '--no-skills',
-    '--no-prompt-templates'
+    '--no-prompt-templates',
+    ...['mcp', 'codemode', 'tool-search'].flatMap(name => ['-e', `builtin:${name}`])
   ];
   if (folder.providersJson !== null) argv.push('-e', join(spec.extensionsDir, 'providers.ts'));
+  if (folder.mcpServersJson !== null) argv.push('-e', join(spec.extensionsDir, MCP_EXTENSION_FILE));
   if (spec.sandbox) argv.push('-e', join(spec.extensionsDir, AGENT_BROWSER_NONO_FALLBACK_EXTENSION_FILE));
   for (const extension of getExtensionFiles(spec)) argv.push('-e', extension);
   if (folder.skillsDir !== null) argv.push('--skill', folder.skillsDir);

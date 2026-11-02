@@ -33,6 +33,10 @@ Everything after `--` is forwarded verbatim to `pi`. Use it for `pi`'s own flags
 
 Per-agent runtime state — generated extensions and session history — lives under `~/.cradle/agents/<name>-<hash>/`, outside the agent folder itself. That keeps the folder clean and committable: nothing a run writes ends up in your agent's source tree.
 
+## MCP servers
+
+Cradle enables Pi’s built-in MCP, codemode, and tool-search support. Add `mcp.json` to an agent folder to register its servers; personal and trusted project MCP configurations also apply. Use `/mcp` inside the session to inspect connections. Pass `-- --no-mcp` to disable built-in MCP for one run. See [Agent Folders](../agent-folders/#mcpjson) for configuration and precedence.
+
 ## Herdr and Moshi
 
 On macOS and Linux, `cradle run` automatically loads your installed Herdr and Moshi Pi hooks when their daemon sockets exist. Run agents normally inside Herdr; no per-agent extension copies or extra `-e` arguments are required. Other personal Pi extensions remain disabled.

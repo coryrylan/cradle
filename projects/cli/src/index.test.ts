@@ -68,6 +68,17 @@ describe('run command', () => {
     expect(exitCode).toBe(0);
   });
 
+  it('should preview agent MCP registrations and explicit built-ins without connecting', async () => {
+    await writeFile(join(agentDir, 'mcp.json'), '{"mcpServers":{"docs":{"url":"https://example.com/mcp"}}}');
+    const { stdout, stderr, exitCode } = await runCli(['run', agentDir, '--dry-run'], env);
+    expect(exitCode).toBe(0);
+    expect(stderr).not.toContain('mcp.json');
+    expect(stdout).toContain('write: ');
+    expect(stdout).toContain('/extensions/mcp.ts');
+    expect(stdout).toContain('-e builtin:mcp -e builtin:codemode -e builtin:tool-search');
+    expect(await exists(env['CRADLE_STATE_DIR'] ?? '')).toBe(false);
+  });
+
   it('should fall back to bare pi and warn when sandbox/nono.json is absent', async () => {
     await rm(join(agentDir, 'sandbox'), { recursive: true });
     const { stdout, stderr, exitCode } = await runCli(['run', agentDir, '--dry-run'], env);

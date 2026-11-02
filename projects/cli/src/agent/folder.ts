@@ -1,6 +1,6 @@
 // Loader/validator for the agent folder format (see /ARCHITECTURE.md). A folder
 // with a SYSTEM.md or APPEND_SYSTEM.md is a complete agent; settings.json,
-// models.json, skills/, extensions/, and sandbox/nono.json
+// models.json, mcp.json, skills/, extensions/, and sandbox/nono.json
 // are optional. A folder with neither system-prompt file, and malformed JSON,
 // are hard errors; everything else unexpected is a warning + continue.
 
@@ -104,6 +104,8 @@ export interface AgentFolder {
   readonly settings: AgentSettings;
   /** Serialized `providers` object from models.json, `null` when absent. */
   readonly providersJson: string | null;
+  /** Serialized `mcpServers` from mcp.json; Pi validates each server when registered. */
+  readonly mcpServersJson: string | null;
   readonly skillsDir: string | null;
   /** `schedule/` dir, `null` when absent. Parsing is lazy — see `./schedules.js`'s `loadSchedules`. */
   readonly scheduleDir: string | null;
@@ -121,6 +123,7 @@ const KNOWN_ENTRIES = new Set([
   'APPEND_SYSTEM.md',
   'settings.json',
   'models.json',
+  'mcp.json',
   'skills',
   'schedule',
   'extensions',
@@ -156,6 +159,7 @@ export async function loadAgentFolder(dir: string): Promise<AgentFolder> {
     appendSystemFilePath: hasAppendSystem ? join(abs, 'APPEND_SYSTEM.md') : null,
     settings: await loadSettings(abs, byName.has('settings.json'), warnings),
     providersJson: await loadProviders(abs, byName.has('models.json'), warnings),
+    mcpServersJson: await loadMcpServers(abs, byName.has('mcp.json'), warnings),
     skillsDir: await resolveSkillsDir(abs, byName.get('skills'), warnings),
     scheduleDir: await resolveScheduleDir(abs, byName.get('schedule'), warnings),
     extensionFiles: await loadExtensions(abs, byName.get('extensions'), warnings),
@@ -318,6 +322,18 @@ async function loadProviders(abs: string, present: boolean, warnings: string[]):
   }
   warnUnsupportedKeys(json, path, ['providers'], warnings);
   return JSON.stringify(fillModelCostDefaults(providers), null, 2);
+}
+
+async function loadMcpServers(abs: string, present: boolean, warnings: string[]): Promise<string | null> {
+  if (!present) return null;
+  const path = join(abs, 'mcp.json');
+  const json = await readJsonObject(path);
+  const mcpServers = json['mcpServers'];
+  if (mcpServers === undefined || !isRecord(mcpServers)) {
+    throw new Error(`${path} must contain an "mcpServers" object`);
+  }
+  warnUnsupportedKeys(json, path, ['mcpServers'], warnings);
+  return JSON.stringify(mcpServers, null, 2);
 }
 
 /**

@@ -50,6 +50,7 @@ describe('loadAgentFolder', () => {
     expect(folder.appendSystemFilePath).toBe(join(dir, 'APPEND_SYSTEM.md'));
     expect(folder.settings).toEqual({});
     expect(folder.providersJson).toBeNull();
+    expect(folder.mcpServersJson).toBeNull();
     expect(folder.skillsDir).toBeNull();
     expect(folder.extensionFiles).toEqual([]);
     expect(folder.sandbox).toEqual(EMPTY_SANDBOX);
@@ -79,6 +80,50 @@ describe('loadAgentFolder', () => {
       unsafeMacosSeatbeltRules: []
     });
     expect(folder.warnings).toEqual([]);
+  });
+
+  describe('mcp.json', () => {
+    beforeEach(appendSystemMd);
+
+    it('should load the server map without interpreting Pi server configuration', async () => {
+      const servers = {
+        local: { command: 'node', args: ['server.mjs'], env: { TOKEN: '${TOKEN}' } },
+        remote: { url: 'https://example.com/mcp', oauth: { clientId: 'example' }, exposure: 'deferred' },
+        invalid: null
+      };
+      await addFile('mcp.json', JSON.stringify({ mcpServers: servers }));
+      const folder = await loadAgentFolder(dir);
+      expect(JSON.parse(folder.mcpServersJson ?? '')).toEqual(servers);
+      expect(folder.warnings).toEqual([]);
+    });
+
+    it('should accept an empty server map', async () => {
+      await addFile('mcp.json', '{"mcpServers":{}}');
+      expect((await loadAgentFolder(dir)).mcpServersJson).toBe('{}');
+    });
+
+    it('should reject malformed JSON and missing or invalid server maps', async () => {
+      await addFile('mcp.json', '{invalid');
+      await expect(loadAgentFolder(dir)).rejects.toThrow('mcp.json is not valid JSON');
+      for (const mcpServers of [undefined, null, [], 'invalid']) {
+        await addFile('mcp.json', JSON.stringify({ mcpServers }));
+        await expect(loadAgentFolder(dir)).rejects.toThrow('must contain an "mcpServers" object');
+      }
+    });
+
+    it('should follow symlinked configuration and reject a dangling link', async () => {
+      const target = join(outside, 'mcp.json');
+      await writeFile(target, '{"mcpServers":{}}');
+      await symlink(target, join(dir, 'mcp.json'));
+      expect((await loadAgentFolder(dir)).mcpServersJson).toBe('{}');
+      await rm(target);
+      await expect(loadAgentFolder(dir)).rejects.toThrow('mcp.json could not be read');
+    });
+
+    it('should warn about unsupported top-level keys', async () => {
+      await addFile('mcp.json', '{"mcpServers":{},"autoEnableCodemode":false}');
+      expect(warningsText(await loadAgentFolder(dir))).toContain('unsupported keys ignored: autoEnableCodemode');
+    });
   });
 
   it('should load an agent with SYSTEM.md only (replaces pi’s prompt), leaving appendSystemFilePath null', async () => {

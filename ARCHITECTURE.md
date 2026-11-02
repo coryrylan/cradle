@@ -10,6 +10,7 @@ my-agent/
   APPEND_SYSTEM.md   required*  append the agent's role + instructions to pi's default prompt
   settings.json      optional   pi-native settings (model selection)
   models.json        optional   pi-native custom provider definitions
+  mcp.json           optional   pi-native MCP server definitions
   skills/            optional   markdown playbooks, loaded when relevant
   extensions/        optional   pi extensions: custom tools, commands, hooks
   sandbox/           optional   sandbox posture (nono.json)
@@ -21,7 +22,7 @@ my-agent/
 
 `*` At least one of `SYSTEM.md` / `APPEND_SYSTEM.md` is required; a folder may ship both.
 
-Every supported file uses a pi-native or cross-tool-standard name. The folder mirrors the layout of pi's own agent dir — `~/.pi/agent/` holds the same `SYSTEM.md`, `APPEND_SYSTEM.md`, `settings.json`, `models.json`, `skills/`, and `extensions/` — so anything written for a personal pi config drops in unchanged. The mirror is layout-deep, not key-deep: `settings.json` keys cradle can't deliver over argv (`theme`, `quietStartup`, …) have no effect in an agent folder and warn at start — see [`settings.json`](#settingsjson).
+Every supported file uses a pi-native or cross-tool-standard name. The folder mirrors the layout of pi's own agent dir — `~/.pi/agent/` holds the same `SYSTEM.md`, `APPEND_SYSTEM.md`, `settings.json`, `models.json`, `mcp.json`, `skills/`, and `extensions/` — so anything written for a personal pi config drops in unchanged. The mirror is layout-deep, not key-deep: `settings.json` keys cradle can't deliver over argv (`theme`, `quietStartup`, …) have no effect in an agent folder and warn at start — see [`settings.json`](#settingsjson).
 
 ```sh
 cradle run ./my-agent                        # launch pi as this agent; sandboxed when sandbox/nono.json exists
@@ -103,6 +104,31 @@ Any other pi-native setting (`theme`, `quietStartup`, `collapseChangelog`, …) 
 
 pi's native custom-provider format. Define self-hosted or OpenAI-compatible endpoints (Ollama, vLLM, SGLang) exactly as you would in `~/.pi/agent/models.json`; cradle registers each provider at launch via a generated extension. One normalization: models without a `cost` get pi's zero-cost default filled in — pi's own models.json loader defaults it, but the `registerProvider` extension API requires it.
 
+### `mcp.json`
+
+Cradle loads Pi’s built-in MCP, codemode, and tool-search extensions explicitly while keeping `--no-extensions` for other personal extensions. This requires Pi 1.4.0 or newer. Personal `~/.pi/agent/mcp.json` and trusted project `.pi/mcp.json` configurations remain available.
+
+`mcp.json` in the agent folder adds session-local servers through a generated `mcp.ts` extension using `pi.registerMcpServer`. The file must contain an `mcpServers` object:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    }
+  }
+}
+```
+
+Pi validates each server and manages stdio/streamable HTTP connections, environment substitution, OAuth, and tool exposure. A rejected registration warns without preventing the other servers from loading. Relative server working directories and arguments use the session’s working directory, not the agent folder.
+
+Personal and trusted project file configurations override agent registrations with the same server name, following Pi’s extension-registration rules. Agent registrations are session-local: `pi mcp list` does not show them. Use `/mcp` inside the Cradle session to inspect connections; server changes take effect on the next Cradle launch. File-level options such as `autoEnableCodemode` are not mapped from the agent file and warn as unsupported; configure them in Pi’s personal or project `mcp.json`.
+
+MCP servers receive the run’s existing sandbox grants and network policy. Cradle does not widen them automatically. Disable built-in MCP for one run with `cradle run ./my-agent -- --no-mcp`. See [Pi’s MCP documentation](https://pi.dev/docs/latest/mcp) for server configuration fields.
+
+See [`examples/mcp`](./examples/mcp) for a complete agent.
+
 ### `skills/`
 
 Skill directories containing `SKILL.md` ([Agent Skills](https://agentskills.io) format), passed to pi via `--skill`. Loaded only when relevant, so the agent gets focused guidance without carrying it in every prompt.
@@ -131,7 +157,7 @@ export default function (pi: ExtensionAPI): void {
 }
 ```
 
-Load order is load-bearing: cradle's generated providers extension loads first (when the agent declares `models.json`), then any `settings.json` `packages` entries (see below), then the agent's own extensions last — they can assume registered providers and any package-provided tools already available.
+Cradle loads Pi’s MCP built-ins first, then generated provider and MCP registrations, the nono fallback when sandboxed, host terminal hooks, package extensions, and the agent’s own extensions last.
 
 **An agent folder is code.** Extensions execute with the pi process's permissions — the nono sandbox contains them at the OS boundary, but inside it they are unrestricted. Treat a third-party agent folder with the same scrutiny as a repo you'd run.
 
@@ -222,6 +248,7 @@ Cradle translates the folder into explicit pi flags — never into files inside 
 | `SYSTEM.md`                       | `--system-prompt <path>` (replaces pi's default prompt)                                   |
 | `APPEND_SYSTEM.md`                | `--append-system-prompt <path>` (appends to it)                                           |
 | `settings.json` model keys        | `--provider` / `--model` / `--thinking`                                                   |
+| `mcp.json`                        | generated `-e` extension → `pi.registerMcpServer(…)`                                      |
 | `models.json`                     | generated `-e` extension → `pi.registerProvider(…)`                                       |
 | `settings.json` `packages`        | per-agent npm install → each package's selected extensions as `-e`                        |
 | `skills/`                         | `--skill <dir>`                                                                           |
