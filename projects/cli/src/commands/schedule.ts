@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 
 import { resolveAgentRef } from '../agent/aliases.js';
 import { loadAgentFolder, type AgentFolder } from '../agent/folder.js';
-import { loadSchedules, missingScheduleDirError, type Schedule } from '../agent/schedules.js';
+import { loadSchedules, missingScheduleDirError, unknownScheduleMessage, type Schedule } from '../agent/schedules.js';
 import { agentId, stateDirFor } from '../agent/state.js';
 import { nextFire, parseCron, type CronFields } from '../schedule/cron.js';
 import { composeLaunchdTimer } from '../schedule/launchd.js';
@@ -61,6 +61,8 @@ export type TimerStatus = 'installed' | 'stale' | 'not-installed';
 export interface ScheduleRow {
   readonly slug: string;
   readonly name: string;
+  /** The task's frontmatter `description`, omitted when it declares none (see ARCHITECTURE.md's schedule frontmatter table). */
+  readonly description?: string;
   readonly cron: string;
   readonly cwd: string;
   readonly cronError?: string;
@@ -78,8 +80,6 @@ interface ScheduleTarget {
 
 export interface SchedulePlan {
   readonly action: ScheduleAction;
-  readonly folder: AgentFolder;
-  readonly platform: SupportedSchedulePlatform;
   /** Populated for `list` only. */
   readonly rows: readonly ScheduleRow[];
   /** Populated for `install`/`remove`/`run` — every selected schedule with its composed `TimerPlan`. */
@@ -236,8 +236,6 @@ async function planScheduleList(ctx: ScheduleActionContext): Promise<SchedulePla
   );
   return {
     action: 'list',
-    folder: ctx.base.folder,
-    platform: ctx.platform,
     rows,
     targets: [],
     warnings: ctx.base.warnings,
@@ -256,8 +254,6 @@ function planScheduleAction(ctx: ScheduleActionContext): SchedulePlan {
       : null;
   return {
     action: ctx.flags.action,
-    folder: ctx.base.folder,
-    platform: ctx.platform,
     rows: [],
     targets,
     warnings: ctx.base.warnings,
@@ -272,15 +268,6 @@ function selectSchedules(schedules: readonly Schedule[], flags: ScheduleFlags): 
   const schedule = schedules.find(candidate => candidate.slug === flags.slug);
   if (schedule === undefined) throw new Error(unknownScheduleMessage(flags.slug, schedules));
   return [schedule];
-}
-
-/** Mirrors `agent/aliases.ts`'s `bothMissedMessage` style — names the requested slug and lists what's available. */
-function unknownScheduleMessage(slug: string, schedules: readonly Schedule[]): string {
-  const known =
-    schedules.length > 0
-      ? ` (available: ${schedules.map(schedule => schedule.slug).join(', ')})`
-      : ' (schedule/ is empty)';
-  return `Unknown schedule "${slug}"${known}`;
 }
 
 function buildScheduleTarget(
@@ -309,7 +296,13 @@ interface ScheduleRowContext {
 
 /** One `list` row. A cron that fails to parse is reported inline (`cronError`) instead of throwing — one bad task must not hide the others. */
 async function buildScheduleRow(schedule: Schedule, context: ScheduleRowContext): Promise<ScheduleRow> {
-  const base = { slug: schedule.slug, name: schedule.name, cron: schedule.cron, cwd: schedule.cwd };
+  const base = {
+    slug: schedule.slug,
+    name: schedule.name,
+    ...(schedule.description !== undefined ? { description: schedule.description } : {}),
+    cron: schedule.cron,
+    cwd: schedule.cwd
+  };
   // Composing the timer is inside the guard, not just parsing: both emitters
   // reject expressions their backend cannot encode (launchd's dict cap,
   // systemd's newline check), and an unlistable schedule must be reported in
@@ -358,12 +351,21 @@ const TIMER_STATUS_LABELS: { readonly [key in TimerStatus]: string } = {
   'not-installed': 'not installed'
 };
 
+// One label column for the whole row, sized by the longest label, so the values stay
+// in one column whether or not the task declares a description.
+const LIST_LABEL_WIDTH = 'description:'.length;
+
+function listLabel(text: string): string {
+  return `  ${text.padEnd(LIST_LABEL_WIDTH)}`;
+}
+
 function formatScheduleRow(row: ScheduleRow): string {
   return [
     `${row.slug} — ${row.name}`,
-    `  cron:  ${row.cron}  (${formatCronLine(row)})`,
-    `  cwd:   ${row.cwd}`,
-    `  timer: ${TIMER_STATUS_LABELS[row.status]}`
+    ...(row.description === undefined ? [] : [`${listLabel('description:')} ${row.description}`]),
+    `${listLabel('cron:')} ${row.cron}  (${formatCronLine(row)})`,
+    `${listLabel('cwd:')} ${row.cwd}`,
+    `${listLabel('timer:')} ${TIMER_STATUS_LABELS[row.status]}`
   ].join('\n');
 }
 

@@ -26,7 +26,9 @@ Everything below the closing `---` is the prompt, verbatim.
 | `cron` | yes | five-field expression, or an `@hourly` / `@daily` / `@weekly` / `@monthly` / `@yearly` macro |
 | `cwd` | yes | the directory the run starts in — absolute, `~/`, or `$HOME/` |
 | `name` | no | display label for `cradle schedule list` and the session name; defaults to the filename |
-| `description` | no | shown in `cradle schedule list` |
+| `description` | no | optional; shown in `cradle schedule list` as its own `description:` line, omitted when absent |
+
+A `list` row prints each field under the task's `slug — name` title: `description:` (only when the task declares one), `cron:` with the next fire time in parentheses, `cwd:`, and `timer:` for the installed-timer state described below.
 
 The filename is the task's identity — `daily-report.md` is the task `daily-report` — so it must be a bare name: letters, digits, `.`, `-`, `_`. It becomes a launchd label and a systemd unit name, which is why the shape is enforced.
 

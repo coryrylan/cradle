@@ -4,6 +4,15 @@ interface Killable {
   kill(signal: ForwardableSignal): void;
 }
 
+/** One empty-argv guard for all three spawn paths; the returned copy is what `Bun.spawn` accepts. */
+function requireArgv(argv: readonly string[]): string[] {
+  const [cmd, ...rest] = argv;
+  if (!cmd) {
+    throw new Error('Command requires at least one argument');
+  }
+  return [cmd, ...rest];
+}
+
 /** A signal handler that forwards `signal` to `proc`. */
 export function killOn(proc: Killable, signal: ForwardableSignal): () => void {
   return () => {
@@ -30,12 +39,8 @@ export async function runForeground(
   env: Record<string, string> = {},
   cwd?: string
 ): Promise<number> {
-  const [cmd, ...rest] = argv;
-  if (!cmd) {
-    throw new Error('Command requires at least one argument');
-  }
-
-  const proc = Bun.spawn([cmd, ...rest], {
+  const command = requireArgv(argv);
+  const proc = Bun.spawn(command, {
     stdin: 'inherit',
     stdout: 'inherit',
     stderr: 'inherit',
@@ -69,12 +74,8 @@ export async function runForeground(
 export async function runCaptureAll(
   argv: readonly string[]
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  const [cmd, ...rest] = argv;
-  if (!cmd) {
-    throw new Error('Command requires at least one argument');
-  }
-
-  const proc = Bun.spawn([cmd, ...rest], {
+  const command = requireArgv(argv);
+  const proc = Bun.spawn(command, {
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -90,13 +91,9 @@ export async function runCaptureAll(
 }
 
 /** Run a package install (e.g. `npm install`) in `cwd`, inheriting output; throws on non-zero exit. */
-export async function runInstall(command: readonly string[], cwd: string): Promise<void> {
-  const [cmd, ...rest] = command;
-  if (!cmd) {
-    throw new Error('Command requires at least one argument');
-  }
-
-  const proc = Bun.spawn([cmd, ...rest], {
+export async function runInstall(argv: readonly string[], cwd: string): Promise<void> {
+  const command = requireArgv(argv);
+  const proc = Bun.spawn(command, {
     cwd,
     stdin: 'ignore',
     stdout: 'inherit',
@@ -106,6 +103,6 @@ export async function runInstall(command: readonly string[], cwd: string): Promi
 
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
-    throw new Error(`Package install failed (${command.join(' ')} exited ${String(exitCode)})`);
+    throw new Error(`Package install failed (${argv.join(' ')} exited ${String(exitCode)})`);
   }
 }

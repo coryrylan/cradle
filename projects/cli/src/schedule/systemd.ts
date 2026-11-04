@@ -151,7 +151,6 @@ export function composeSystemdTimer(context: TimerContext, fields: CronFields): 
   const timerUnit = `${base}.timer`;
 
   return {
-    id: base,
     files: [
       { path: servicePath, content: composeServiceFile(context) },
       { path: timerPath, content: composeTimerFile(context, fields) }

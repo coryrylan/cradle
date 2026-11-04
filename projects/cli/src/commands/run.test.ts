@@ -44,11 +44,13 @@ describe('planRun', () => {
     // --silent suppresses nono's startup banner by default.
     expect(composeArgv(plan.launch)).not.toContain('--allow');
     expect(composeArgv(plan.launch).slice(0, 5)).toEqual(['/shims/nono', 'run', '--silent', '--profile', profilePath]);
-    expect(plan.extensionsDir).toBe(join(stateDir, 'extensions'));
-    expect(plan.sessionsDir).toBe(join(stateDir, 'sessions'));
+    // The launch carries the resolved state root as the projection every path below derives from.
+    expect(plan.launch.stateDir).toBe(stateDir);
+    expect(plan.launch.extensionsDir).toBe(join(stateDir, 'extensions'));
+    expect(plan.launch.sessionsDir).toBe(join(stateDir, 'sessions'));
     expect(plan.launch.miseCacheDir).toBe(join(stateDir, 'mise-cache'));
     expect(relFiles(plan)).toEqual([agentBrowserNonoFallbackFile]);
-    expect(composeArgv(plan.launch)).toContain(join(plan.extensionsDir, agentBrowserNonoFallbackFile));
+    expect(composeArgv(plan.launch)).toContain(join(plan.launch.extensionsDir, agentBrowserNonoFallbackFile));
     expect(plan.profile?.path).toBe(profilePath);
     expect(JSON.parse(plan.profile?.content ?? '{}').extends).toBe('default');
     expect(plan.dryRun).toBe(false);
@@ -115,7 +117,7 @@ describe('planRun', () => {
     await addFile('models.json', JSON.stringify({ providers: { ollama: { baseUrl: 'http://x/v1' } } }));
     const plan = await planRun({ dir: agentDir }, deps);
     expect(relFiles(plan)).toEqual(['providers.ts', agentBrowserNonoFallbackFile]);
-    expect(composeArgv(plan.launch)).toContain(join(plan.extensionsDir, 'providers.ts'));
+    expect(composeArgv(plan.launch)).toContain(join(plan.launch.extensionsDir, 'providers.ts'));
   });
 
   it('should materialize MCP registrations for sandboxed and unsandboxed agents and remove stale ones', async () => {
@@ -123,7 +125,7 @@ describe('planRun', () => {
     for (const noSandbox of [true, false]) {
       const plan = await planRun({ dir: agentDir, noSandbox }, deps);
       const { argv } = await materializeRun(plan);
-      const extensionPath = join(plan.extensionsDir, 'mcp.ts');
+      const extensionPath = join(plan.launch.extensionsDir, 'mcp.ts');
       expect(await readFile(extensionPath, 'utf8')).toContain('registerMcpServer');
       expect(argv).toContain(extensionPath);
       expect(argv).toContain('builtin:mcp');
@@ -132,8 +134,8 @@ describe('planRun', () => {
     await rm(join(agentDir, 'mcp.json'));
     const plan = await planRun({ dir: agentDir }, deps);
     const { argv } = await materializeRun(plan);
-    expect(argv).not.toContain(join(plan.extensionsDir, 'mcp.ts'));
-    expect(await exists(join(plan.extensionsDir, 'mcp.ts'))).toBe(false);
+    expect(argv).not.toContain(join(plan.launch.extensionsDir, 'mcp.ts'));
+    expect(await exists(join(plan.launch.extensionsDir, 'mcp.ts'))).toBe(false);
   });
 
   it('should pass agent extensions/ files straight through after the sandbox fallback', async () => {
@@ -141,7 +143,7 @@ describe('planRun', () => {
     const plan = await planRun({ dir: agentDir }, deps);
     expect(relFiles(plan)).toEqual([agentBrowserNonoFallbackFile]);
     const argv = composeArgv(plan.launch);
-    expect(argv.indexOf(join(plan.extensionsDir, agentBrowserNonoFallbackFile))).toBeLessThan(
+    expect(argv.indexOf(join(plan.launch.extensionsDir, agentBrowserNonoFallbackFile))).toBeLessThan(
       argv.indexOf(join(agentDir, 'extensions', 'flip.ts'))
     );
   });
@@ -373,8 +375,8 @@ describe('planRun alias resolution', () => {
     try {
       const aliased = await planRun({ dir: 'my-agent' }, { ...deps, home: aliasHome });
       const absolute = await planRun({ dir: agentDir }, deps);
-      expect(aliased.extensionsDir).toBe(absolute.extensionsDir);
-      expect(aliased.sessionsDir).toBe(absolute.sessionsDir);
+      expect(aliased.launch.extensionsDir).toBe(absolute.launch.extensionsDir);
+      expect(aliased.launch.sessionsDir).toBe(absolute.launch.sessionsDir);
       expect(aliased.warnings).toEqual([]);
     } finally {
       await rm(aliasHome, { recursive: true, force: true });
@@ -465,7 +467,7 @@ describe('materializeRun packages', () => {
     const entry = join(npmDir, 'node_modules', 'pi-example-tool', 'index.ts');
     expect(result.argv).toContain(entry);
     expect(result.argv.indexOf(entry)).toBeGreaterThan(
-      result.argv.indexOf(join(plan.extensionsDir, agentBrowserNonoFallbackFile))
+      result.argv.indexOf(join(plan.launch.extensionsDir, agentBrowserNonoFallbackFile))
     );
     expect(result.warnings).toEqual([]);
   });
@@ -572,12 +574,14 @@ describe('materializeRun', () => {
     await materializeRun(plan);
     // Assert the on-disk file, not the in-memory plan.files, so a write-time
     // transform would fail here.
-    expect((await readdir(plan.extensionsDir)).sort()).toEqual([agentBrowserNonoFallbackFile, 'providers.ts'].sort());
-    expect(await readFile(join(plan.extensionsDir, 'providers.ts'), 'utf8')).toContain('registerProvider');
-    expect(await readFile(join(plan.extensionsDir, agentBrowserNonoFallbackFile), 'utf8')).toContain(
+    expect((await readdir(plan.launch.extensionsDir)).sort()).toEqual(
+      [agentBrowserNonoFallbackFile, 'providers.ts'].sort()
+    );
+    expect(await readFile(join(plan.launch.extensionsDir, 'providers.ts'), 'utf8')).toContain('registerProvider');
+    expect(await readFile(join(plan.launch.extensionsDir, agentBrowserNonoFallbackFile), 'utf8')).toContain(
       'AGENT_BROWSER_PROXY'
     );
-    expect(await readdir(plan.sessionsDir)).toEqual([]);
+    expect(await readdir(plan.launch.sessionsDir)).toEqual([]);
   });
 
   it('should write no extensions dir when an unsandboxed agent declares nothing generated', async () => {
@@ -586,19 +590,21 @@ describe('materializeRun', () => {
       { ...deps, which: createWhichStub({ pi: '/shims/pi' }) }
     );
     await materializeRun(plan);
-    expect(await exists(plan.extensionsDir)).toBe(false);
-    expect(await readdir(plan.sessionsDir)).toEqual([]);
+    expect(await exists(plan.launch.extensionsDir)).toBe(false);
+    expect(await readdir(plan.launch.sessionsDir)).toEqual([]);
   });
 
   it('should clean stale generated extensions but never touch sessions', async () => {
     await addFile('models.json', JSON.stringify({ providers: { ollama: { baseUrl: 'http://x/v1' } } }));
     const plan = await planRun({ dir: agentDir }, deps);
     await materializeRun(plan);
-    await writeFile(join(plan.extensionsDir, 'stale.ts'), 'old', 'utf8');
-    await writeFile(join(plan.sessionsDir, 'session.jsonl'), '{}', 'utf8');
+    await writeFile(join(plan.launch.extensionsDir, 'stale.ts'), 'old', 'utf8');
+    await writeFile(join(plan.launch.sessionsDir, 'session.jsonl'), '{}', 'utf8');
     await materializeRun(plan);
-    expect((await readdir(plan.extensionsDir)).sort()).toEqual([agentBrowserNonoFallbackFile, 'providers.ts'].sort());
-    expect(await readFile(join(plan.sessionsDir, 'session.jsonl'), 'utf8')).toBe('{}');
+    expect((await readdir(plan.launch.extensionsDir)).sort()).toEqual(
+      [agentBrowserNonoFallbackFile, 'providers.ts'].sort()
+    );
+    expect(await readFile(join(plan.launch.sessionsDir, 'session.jsonl'), 'utf8')).toBe('{}');
   });
 
   it('should be idempotent across repeated runs', async () => {
@@ -606,7 +612,9 @@ describe('materializeRun', () => {
     const plan = await planRun({ dir: agentDir }, deps);
     await materializeRun(plan);
     await materializeRun(plan);
-    expect((await readdir(plan.extensionsDir)).sort()).toEqual([agentBrowserNonoFallbackFile, 'providers.ts'].sort());
+    expect((await readdir(plan.launch.extensionsDir)).sort()).toEqual(
+      [agentBrowserNonoFallbackFile, 'providers.ts'].sort()
+    );
   });
 
   it('should write the generated per-agent profile into the state dir on a sandboxed run', async () => {
@@ -641,28 +649,22 @@ describe('materializeRun', () => {
     const plan = await planRun({ dir: agentDir }, deps);
     const blocker = join(root, 'blocker');
     await writeFile(blocker, '', 'utf8');
-    await expect(materializeRun({ ...plan, extensionsDir: join(blocker, 'extensions') })).rejects.toThrow(
-      'Failed to write agent extensions'
-    );
+    const unwritable = { ...plan, launch: { ...plan.launch, extensionsDir: join(blocker, 'extensions') } };
+    await expect(materializeRun(unwritable)).rejects.toThrow('Failed to write agent extensions');
   });
 
-  it('should keep the composed argv consistent with an overridden plan.extensionsDir/sessionsDir', async () => {
+  it('should write to and compose from the same launch dirs, so the two cannot drift', async () => {
     await addFile('models.json', JSON.stringify({ providers: { ollama: { baseUrl: 'http://x/v1' } } }));
     const plan = await planRun({ dir: agentDir }, deps);
-    const overriddenExtensionsDir = join(root, 'custom-extensions');
-    const overriddenSessionsDir = join(root, 'custom-sessions');
-    const overridden = { ...plan, extensionsDir: overriddenExtensionsDir, sessionsDir: overriddenSessionsDir };
-    const result = await materializeRun(overridden);
-    // Files land in the overridden dirs (materializeRun writes to plan.extensionsDir directly)...
-    expect((await readdir(overriddenExtensionsDir)).sort()).toEqual(
-      [agentBrowserNonoFallbackFile, 'providers.ts'].sort()
-    );
-    // ...and the composed argv agrees, rather than pointing at the plan's original dirs.
-    expect(result.argv).toContain(join(overriddenExtensionsDir, 'providers.ts'));
-    expect(result.argv).toContain(join(overriddenExtensionsDir, agentBrowserNonoFallbackFile));
-    expect(result.argv[result.argv.indexOf('--session-dir') + 1]).toBe(overriddenSessionsDir);
-    expect(result.argv).not.toContain(join(plan.extensionsDir, 'providers.ts'));
-    expect(result.argv).not.toContain(plan.sessionsDir);
+    const extensionsDir = join(root, 'custom-extensions');
+    const sessionsDir = join(root, 'custom-sessions');
+    const redirected = { ...plan, launch: { ...plan.launch, extensionsDir, sessionsDir } };
+    const result = await materializeRun(redirected);
+    // One source for both halves: the directories materializeRun writes are the ones the argv names.
+    expect((await readdir(extensionsDir)).sort()).toEqual([agentBrowserNonoFallbackFile, 'providers.ts'].sort());
+    expect(result.argv).toContain(join(extensionsDir, 'providers.ts'));
+    expect(result.argv).toContain(join(extensionsDir, agentBrowserNonoFallbackFile));
+    expect(result.argv[result.argv.indexOf('--session-dir') + 1]).toBe(sessionsDir);
   });
 });
 

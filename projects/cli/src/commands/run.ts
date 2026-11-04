@@ -15,12 +15,13 @@ import { emitMcpExtension, MCP_EXTENSION_FILE } from '../agent/extensions/mcp.js
 import { loadAgentFolder, type AgentFolder, type AgentNetwork } from '../agent/folder.js';
 import { composeArgv, type LaunchSpec } from '../agent/launch.js';
 import { emitPackagesManifest, resolvePackageEntries, type NpmPackageSpec } from '../agent/packages.js';
-import { loadSchedules, missingScheduleDirError, type Schedule } from '../agent/schedules.js';
+import { loadSchedules, missingScheduleDirError, unknownScheduleMessage, type Schedule } from '../agent/schedules.js';
 import { stateDirFor, statePaths } from '../agent/state.js';
 import { getTerminalIntegrations, type TerminalIntegrations } from '../agent/terminal-integrations.js';
 import { resolveLinkedGitDir } from '../nono/linked-git-dir.js';
 import { AGENT_PROFILE_FILE, buildProfileJson, findDegenerateSandboxCwd } from '../nono/profiles.js';
-import { installTree, readTextIfExists, type InstallContext, type TreeFile } from '../setup/install.js';
+import { installTree, readTextIfExists, type TreeFile } from '../setup/install.js';
+import { getErrorMessage, trimHostEntries } from '../setup/utils.js';
 import { requireBin, type WhichFn } from '../util/which.js';
 
 export interface RunFlags {
@@ -81,23 +82,19 @@ export interface PackagesPlan {
 }
 
 export interface RunPlan {
-  /** Generated extensions, relative to `extensionsDir`. */
+  /** Generated extensions, relative to `launch.extensionsDir`. */
   readonly files: readonly TreeFile[];
-  /**
-   * Authoritative — the single derivation site for where generated extensions
-   * and sessions live. `materializeRun` re-asserts these onto `launch`
-   * before composing the final argv, so overriding either here (as tests do)
-   * changes the composed argv accordingly instead of silently disagreeing
-   * with whatever `launch` had baked in at `planRun` time.
-   */
-  readonly extensionsDir: string;
-  readonly sessionsDir: string;
   readonly warnings: readonly string[];
   /** The generated per-agent nono profile to write before spawning; `null` when sandboxing is disabled. */
   readonly profile: { readonly path: string; readonly content: string } | null;
   /** Settings.json `packages` resolved into an install plan; `null` when the folder declares none. */
   readonly packages: PackagesPlan | null;
-  /** The single argv source: `composeArgv(plan.launch)` — package-entry-free until `materializeRun` recomposes it with resolved package entries. */
+  /**
+   * The single source for both the argv (`composeArgv(plan.launch)`) and the state paths
+   * `materializeRun` writes to — `extensionsDir`, `sessionsDir`, `miseCacheDir`, each derived
+   * once from `agent/state.ts`'s `statePaths` off `launch.stateDir`. Package entries stay
+   * absent until `materializeRun` recomposes with the resolved ones.
+   */
   readonly launch: LaunchSpec;
   /**
    * The effective working directory: the terminal cwd, a named alias's cwd,
@@ -142,7 +139,9 @@ export async function planRun(flags: RunFlags, deps: RunDeps = {}): Promise<RunP
     sessionsDir,
     miseCacheDir
   });
-  const isolation = await buildIsolation(posture, folder, {
+  const profile = await buildProfile({
+    posture,
+    folder,
     home,
     cwd: scheduled.cwd,
     stateDir,
@@ -152,10 +151,8 @@ export async function planRun(flags: RunFlags, deps: RunDeps = {}): Promise<RunP
   const packages = buildPackagesPlan(folder, stateDir);
   return {
     files: emitExtensionFiles(folder, posture.sandbox),
-    extensionsDir,
-    sessionsDir,
     warnings: [...refWarnings, ...scheduled.warnings, ...posture.warnings],
-    profile: isolation,
+    profile,
     packages,
     launch,
     cwd: scheduled.cwd,
@@ -221,15 +218,6 @@ async function missingScheduleCwdWarning(schedule: Schedule): Promise<readonly s
   return [`schedule "${schedule.slug}" cwd does not exist: ${schedule.cwd}`];
 }
 
-/** Mirrors `aliases.ts`'s `bothMissedMessage` style — names the requested slug and lists what's available. */
-function unknownScheduleMessage(slug: string, schedules: readonly Schedule[]): string {
-  const known =
-    schedules.length > 0
-      ? ` (available: ${schedules.map(schedule => schedule.slug).join(', ')})`
-      : ' (schedule/ is empty)';
-  return `Unknown schedule "${slug}"${known}`;
-}
-
 interface LaunchContext {
   readonly home: string;
   readonly deps: RunDeps;
@@ -245,12 +233,8 @@ interface LaunchContext {
   readonly miseCacheDir: string;
 }
 
-interface PlannedLaunch extends LaunchSpec {
-  readonly terminalIntegrations: TerminalIntegrations;
-}
-
 /** Resolve the generated-extension paths and profile path into the `LaunchSpec` `composeArgv` consumes. */
-async function buildLaunch(ctx: LaunchContext): Promise<PlannedLaunch> {
+async function buildLaunch(ctx: LaunchContext): Promise<LaunchSpec> {
   const { folder, flags, passthrough, sandbox, bins, stateDir, extensionsDir, sessionsDir, miseCacheDir } = ctx;
   return {
     terminalIntegrations: await getTerminalIntegrations({
@@ -315,13 +299,12 @@ function resolveNetwork(flags: RunFlags, folder: AgentFolder, warnings: string[]
 }
 
 /**
- * Trim `--allow-host` entries and drop blanks — mirrors `folder.ts`'s
- * `readHostList` (the folder-side `network.allow_domain` reader): an
- * untrimmed host lands verbatim in the profile's `allow_domain` and never
+ * Trim and drop blank `--allow-host` entries with the same `trimHostEntries` rule as `folder.ts`'s
+ * `readHostList`: an untrimmed host lands verbatim in the profile's `allow_domain` and never
  * matches at proxy time.
  */
 function readCliHostList(hosts: readonly string[], warnings: string[]): readonly string[] {
-  const trimmed = hosts.map(host => host.trim()).filter(host => host !== '');
+  const trimmed = trimHostEntries(hosts);
   if (trimmed.length !== hosts.length) warnings.push('--allow-host entries must be non-empty — blanks ignored');
   return trimmed;
 }
@@ -389,28 +372,22 @@ export async function materializeRun(
   plan: RunPlan,
   deps: MaterializeDeps = {}
 ): Promise<{ argv: string[]; warnings: string[] }> {
-  // Sequential on purpose: installTree collects failures into ctx, and its
-  // friendly one-line error must surface before any raw fs error the later
-  // writes would throw when the same state dir is unwritable.
-  const ctx: InstallContext = { dryRun: false, results: [], failures: [] };
-  await installTree(ctx, 'extensions', plan.extensionsDir, plan.files);
-  if (ctx.failures.length > 0) {
-    throw new Error(`Failed to write agent extensions: ${ctx.failures.join('; ')}`);
+  // Sequential on purpose: the generated-extension write is the failure most likely to hit an
+  // unwritable state dir, and its named message must surface before the raw fs error the later
+  // writes against that same dir would throw.
+  try {
+    await installTree(plan.launch.extensionsDir, plan.files);
+  } catch (error) {
+    throw new Error(`Failed to write agent extensions: ${getErrorMessage(error)}`, { cause: error });
   }
-  await mkdir(plan.sessionsDir, { recursive: true });
+  await mkdir(plan.launch.sessionsDir, { recursive: true });
   if (plan.profile !== null) {
     await mkdir(dirname(plan.profile.path), { recursive: true });
     await writeFile(plan.profile.path, plan.profile.content, 'utf8');
   }
-  // `plan.extensionsDir`/`plan.sessionsDir` are authoritative (see `RunPlan`
-  // docs): re-assert them onto `launch` here so a plan whose dirs were
-  // overridden after `planRun` still gets a composed argv that agrees with
-  // what was actually written to disk above, instead of whatever `launch` had
-  // baked in at `planRun` time.
-  const launch: LaunchSpec = { ...plan.launch, extensionsDir: plan.extensionsDir, sessionsDir: plan.sessionsDir };
   return plan.packages === null
-    ? { argv: composeArgv(launch), warnings: [] }
-    : await installAndResolvePackages(plan.packages, launch, deps);
+    ? { argv: composeArgv(plan.launch), warnings: [] }
+    : await installAndResolvePackages(plan.packages, plan.launch, deps);
 }
 
 /** Skip a reinstall when the manifest is unchanged and `node_modules` already exists — npm install is not free. */
@@ -459,24 +436,14 @@ function resolveBins(sandbox: boolean, dryRun: boolean, which?: WhichFn): Resolv
   };
 }
 
-interface IsolationContext {
+interface ProfileContext {
+  readonly posture: ResolvedPosture;
+  readonly folder: AgentFolder;
   readonly home: string;
   readonly cwd: string;
   readonly stateDir: string;
   readonly profilePath: string;
   readonly terminalIntegrations: TerminalIntegrations;
-}
-
-async function buildIsolation(
-  posture: ResolvedPosture,
-  folder: AgentFolder,
-  ctx: IsolationContext
-): Promise<RunPlan['profile']> {
-  const linkedGitDir = posture.sandbox ? await resolveLinkedGitDir(ctx.cwd) : undefined;
-  return sandboxPlan(posture.sandbox, folder, posture.network, {
-    ...ctx,
-    ...(linkedGitDir !== undefined ? { linkedGitDir } : {})
-  });
 }
 
 /**
@@ -492,20 +459,9 @@ async function buildIsolation(
  * start when a grant overlaps its protected state root, and that refusal is
  * opaque — a cradle-level error here names the offending directory instead.
  */
-function sandboxPlan(
-  sandbox: boolean,
-  folder: AgentFolder,
-  network: AgentNetwork | undefined,
-  ctx: {
-    home: string;
-    cwd: string;
-    stateDir: string;
-    profilePath: string;
-    linkedGitDir?: string;
-    terminalIntegrations: TerminalIntegrations;
-  }
-): { path: string; content: string } | null {
-  if (!sandbox) return null;
+async function buildProfile(ctx: ProfileContext): Promise<RunPlan['profile']> {
+  const { posture, folder } = ctx;
+  if (!posture.sandbox) return null;
   const degenerateCwd = findDegenerateSandboxCwd(ctx.cwd, ctx.home);
   if (degenerateCwd !== undefined) {
     throw new Error(
@@ -514,6 +470,9 @@ function sandboxPlan(
         `project directory instead`
     );
   }
+  // Resolved only once the run is known to be sandboxed: an unsandboxed run grants nothing,
+  // so there is no git dir to look for.
+  const linkedGitDir = await resolveLinkedGitDir(ctx.cwd);
   const content = buildProfileJson({
     home: ctx.home,
     cwd: ctx.cwd,
@@ -523,8 +482,8 @@ function sandboxPlan(
     rules: folder.sandbox.unsafeMacosSeatbeltRules,
     terminalSocketPaths: ctx.terminalIntegrations.socketPaths,
     terminalExtensionFiles: ctx.terminalIntegrations.extensionFiles,
-    ...(network !== undefined ? { network } : {}),
-    ...(ctx.linkedGitDir !== undefined ? { linkedGitDir: ctx.linkedGitDir } : {})
+    ...(posture.network !== undefined ? { network: posture.network } : {}),
+    ...(linkedGitDir !== undefined ? { linkedGitDir } : {})
   });
   return { path: ctx.profilePath, content };
 }

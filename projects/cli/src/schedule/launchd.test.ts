@@ -11,7 +11,6 @@ function timerContext(overrides: Partial<TimerContext> = {}): TimerContext {
     schedule: {
       slug: 'nightly-report',
       name: 'Nightly Report',
-      path: '/agents/reporter/schedule/nightly-report.md',
       cron: '0 9 * * 1-5',
       cwd: '/work/project',
       prompt: 'Summarize yesterday.'
@@ -113,7 +112,6 @@ describe('composeLaunchdTimer', () => {
         hour: [9],
         dayOfWeek: [1, 2, 3, 4, 5]
       });
-      expect(plan.id).toBe('com.cradle.reporter-a1b2c3d4.nightly-report');
       expect(plan.files).toHaveLength(1);
       expect(plan.files[0]?.path).toBe(
         '/home/u/Library/LaunchAgents/com.cradle.reporter-a1b2c3d4.nightly-report.plist'

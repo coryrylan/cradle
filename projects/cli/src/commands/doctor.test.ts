@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { createWhichStub } from '../util/which.js';
-import { doctorExitCode, formatDoctorReport, runDoctor } from './doctor.js';
+import { doctorExitCode, formatDoctorReport, normalizeVersionOutput, runDoctor } from './doctor.js';
 
 const allFound = { pi: '/shims/pi', nono: '/shims/nono', mise: '/shims/mise' };
 // Pinned so these assertions are deterministic on any CI/dev machine —
@@ -100,6 +100,34 @@ describe('runDoctor', () => {
   });
 });
 
+describe('normalizeVersionOutput', () => {
+  it('should read a bare version from a bin that prints only one', () => {
+    expect(normalizeVersionOutput('0.80.10\n')).toBe('0.80.10');
+  });
+
+  it('should skip a command-name prefix', () => {
+    expect(normalizeVersionOutput('nono 0.68.0\n')).toBe('0.68.0');
+  });
+
+  it('should keep a leading v when the bin prints one', () => {
+    expect(normalizeVersionOutput('v1.4.0\n')).toBe('v1.4.0');
+  });
+
+  it('should capture a prerelease suffix and stop at the first whitespace-delimited token', () => {
+    expect(normalizeVersionOutput('pi 2.0.0-beta.1 (build 42)\n')).toBe('2.0.0-beta.1');
+  });
+
+  it('should read only the first line, ignoring release-note prose below it', () => {
+    expect(normalizeVersionOutput('banner 1.1.1\n2.2.2\n')).toBe('1.1.1');
+    expect(normalizeVersionOutput('no version here\n9.9.9\n')).toBeNull();
+  });
+
+  it('should return null for empty or version-less output', () => {
+    expect(normalizeVersionOutput('')).toBeNull();
+    expect(normalizeVersionOutput('canary\n')).toBeNull();
+  });
+});
+
 describe('doctorExitCode', () => {
   it('should return 1 when pi is missing', async () => {
     expect(doctorExitCode(await runDoctor({ which: createWhichStub({ nono: '/n', mise: '/m' }) }))).toBe(1);
@@ -117,8 +145,8 @@ describe('doctorExitCode', () => {
 describe('formatDoctorReport', () => {
   it('should render found and missing checks distinctly and attach notes', () => {
     const report = formatDoctorReport([
-      { name: 'pi', bin: 'pi', required: true, found: '/shims/pi', version: '1.2.3', note: 'heads up' },
-      { name: 'nono', bin: 'nono', required: true, found: null, version: null }
+      { name: 'pi', required: true, found: '/shims/pi', version: '1.2.3', note: 'heads up' },
+      { name: 'nono', required: true, found: null, version: null }
     ]);
     expect(report).toContain('✓ pi');
     expect(report).toContain('⚠ heads up');
@@ -127,36 +155,34 @@ describe('formatDoctorReport', () => {
   });
 
   it('should render a missing recommended tool as a soft note, not a required failure', () => {
-    const report = formatDoctorReport([{ name: 'mise', bin: 'mise', required: false, found: null, version: null }]);
+    const report = formatDoctorReport([{ name: 'mise', required: false, found: null, version: null }]);
     expect(report).toContain('○ mise');
     expect(report).toContain('not found (recommended)');
     expect(report).not.toContain('MISSING (required)');
   });
 
   it('should show the version column before the path when the version is known', () => {
-    const report = formatDoctorReport([
-      { name: 'pi', bin: 'pi', required: true, found: '/shims/pi', version: '1.2.3' }
-    ]);
+    const report = formatDoctorReport([{ name: 'pi', required: true, found: '/shims/pi', version: '1.2.3' }]);
     expect(report).toContain('✓ pi       1.2.3  /shims/pi');
   });
 
   it('should omit the version column entirely when a bin exposes no version', () => {
-    const report = formatDoctorReport([{ name: 'pi', bin: 'pi', required: true, found: '/shims/pi', version: null }]);
+    const report = formatDoctorReport([{ name: 'pi', required: true, found: '/shims/pi', version: null }]);
     expect(report).toContain('✓ pi       /shims/pi');
     expect(report).not.toContain('?');
   });
 
   it('should widen every name column to fit the longest bin name', () => {
     const report = formatDoctorReport([
-      { name: 'pi', bin: 'pi', required: true, found: '/shims/pi', version: '1.2.3' },
-      { name: 'launchctl', bin: 'launchctl', required: false, found: '/bin/launchctl', version: null }
+      { name: 'pi', required: true, found: '/shims/pi', version: '1.2.3' },
+      { name: 'launchctl', required: false, found: '/bin/launchctl', version: null }
     ]);
     const [piLine, launchctlLine] = report.split('\n');
     expect(piLine?.indexOf('1.2.3')).toBe(launchctlLine?.indexOf('/bin/launchctl'));
   });
 
   it('should leave missing-bin lines unaffected by the version column', () => {
-    const report = formatDoctorReport([{ name: 'nono', bin: 'nono', required: true, found: null, version: null }]);
+    const report = formatDoctorReport([{ name: 'nono', required: true, found: null, version: null }]);
     expect(report).toBe('✗ nono     MISSING (required)');
   });
 });

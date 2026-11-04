@@ -11,7 +11,6 @@ function timerContext(overrides: Partial<TimerContext> = {}): TimerContext {
     schedule: {
       slug: 'nightly-report',
       name: 'Nightly Report',
-      path: '/agents/reporter/schedule/nightly-report.md',
       cron: '0 9 * * 1-5',
       cwd: '/work/project',
       prompt: 'Summarize yesterday.'
@@ -120,7 +119,6 @@ describe('composeSystemdTimer', () => {
   describe('plan shape', () => {
     it('should derive the unit base name, file paths, and unit content', () => {
       const plan = composeSystemdTimer(timerContext(), { ...EVERY, minute: [0], hour: [9] });
-      expect(plan.id).toBe('cradle-reporter-a1b2c3d4-nightly-report');
       expect(plan.files).toHaveLength(2);
       expect(plan.files[0]?.path).toBe('/home/u/.config/systemd/user/cradle-reporter-a1b2c3d4-nightly-report.service');
       expect(plan.files[1]?.path).toBe('/home/u/.config/systemd/user/cradle-reporter-a1b2c3d4-nightly-report.timer');

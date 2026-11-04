@@ -17,6 +17,7 @@ import {
   isRecord,
   isStringArray,
   parseJson,
+  trimHostEntries,
   warnUnsupportedKeys,
   type JsonValue
 } from '../setup/utils.js';
@@ -160,8 +161,8 @@ export async function loadAgentFolder(dir: string): Promise<AgentFolder> {
     settings: await loadSettings(abs, byName.has('settings.json'), warnings),
     providersJson: await loadProviders(abs, byName.has('models.json'), warnings),
     mcpServersJson: await loadMcpServers(abs, byName.has('mcp.json'), warnings),
-    skillsDir: await resolveSkillsDir(abs, byName.get('skills'), warnings),
-    scheduleDir: await resolveScheduleDir(abs, byName.get('schedule'), warnings),
+    skillsDir: await resolveFolderDir(abs, byName.get('skills'), 'skills', warnings),
+    scheduleDir: await resolveFolderDir(abs, byName.get('schedule'), 'schedule', warnings),
     extensionFiles: await loadExtensions(abs, byName.get('extensions'), warnings),
     sandbox,
     warnings
@@ -355,22 +356,19 @@ function fillModelCostDefaults(providers: { readonly [key: string]: JsonValue })
   );
 }
 
-async function resolveSkillsDir(abs: string, entry: Dirent | undefined, warnings: string[]): Promise<string | null> {
+/** A folder-format directory entry (`skills/`, `schedule/`): absent is fine, present-but-not-a-directory warns away. */
+async function resolveFolderDir(
+  abs: string,
+  entry: Dirent | undefined,
+  name: string,
+  warnings: string[]
+): Promise<string | null> {
   if (!entry) return null;
   if (!(await isDirectoryEntry(abs, entry))) {
-    warnings.push('skills must be a directory — ignored');
+    warnings.push(`${name} must be a directory — ignored`);
     return null;
   }
-  return join(abs, 'skills');
-}
-
-async function resolveScheduleDir(abs: string, entry: Dirent | undefined, warnings: string[]): Promise<string | null> {
-  if (!entry) return null;
-  if (!(await isDirectoryEntry(abs, entry))) {
-    warnings.push('schedule must be a directory — ignored');
-    return null;
-  }
-  return join(abs, 'schedule');
+  return join(abs, name);
 }
 
 /** Mirror pi's own extension discovery shapes: top-level `extensions/*.ts` plus each subdir's `index.ts`. */
@@ -505,9 +503,7 @@ function readHostList(
     warnings.push(`${path}: ${key} must be an array of strings — ignored`);
     return [];
   }
-  // Trim like readSeatbeltRules does: a host with stray whitespace would land
-  // verbatim in the profile's allow_domain and never match at proxy time.
-  const hosts = value.map(entry => entry.trim()).filter(entry => entry !== '');
+  const hosts = trimHostEntries(value);
   if (hosts.length !== value.length) warnings.push(`${path}: ${key} entries must be non-empty — blanks ignored`);
   return hosts;
 }

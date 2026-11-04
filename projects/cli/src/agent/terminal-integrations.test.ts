@@ -147,7 +147,7 @@ describe('planRun terminal integrations', () => {
     expect(profile.filesystem.unix_socket).toEqual([join(root, '.config/herdr/herdr.sock'), join(root, 'moshi.sock')]);
     expect(profile.filesystem.unix_socket_bind).toBeUndefined();
     expect(profile.filesystem.unix_socket_dir_bind).toBeUndefined();
-    expect(plan.launch.terminalIntegrations?.extensionFiles).toEqual([]);
+    expect(plan.launch.terminalIntegrations.extensionFiles).toEqual([]);
     expect(plan.warnings).toEqual([]);
   });
 

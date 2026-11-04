@@ -13,15 +13,13 @@ import { basename, extname, join, resolve } from 'node:path';
 
 import { expandHome } from '../nono/profiles.js';
 import { readTextIfExists } from '../setup/install.js';
-import { getErrorMessage, isPathShaped } from '../setup/utils.js';
+import { getErrorMessage, isPathShaped, warnUnsupportedKeys } from '../setup/utils.js';
 
 export interface Schedule {
   /** Filename without `.md` — the identity used on the CLI and in timer labels. */
   readonly slug: string;
   /** Display label from frontmatter `name`; falls back to `slug`. */
   readonly name: string;
-  /** Absolute path of the source `.md`. */
-  readonly path: string;
   /** Raw cron expression, unparsed. */
   readonly cron: string;
   /** Absolute working directory, `~`/`$HOME` already expanded. */
@@ -56,6 +54,19 @@ export async function missingScheduleDirError(agentDir: string): Promise<Error> 
     ? ' — found schedules/, rename it to schedule/ (singular)'
     : '';
   return new Error(`No schedule/ directory in ${agentDir}${hint}`);
+}
+
+/**
+ * The "requested slug is not in `schedule/`" error, listing what is available — the same shape as
+ * `aliases.ts`'s `bothMissedMessage`. Both `cradle schedule install/remove` and the headless
+ * `cradle schedule run` path (`commands/run.ts`) report it, so it lives with the `Schedule` type.
+ */
+export function unknownScheduleMessage(slug: string, schedules: readonly Schedule[]): string {
+  const available =
+    schedules.length > 0
+      ? ` (available: ${schedules.map(schedule => schedule.slug).join(', ')})`
+      : ' (schedule/ is empty)';
+  return `Unknown schedule "${slug}"${available}`;
 }
 
 export async function loadSchedules(scheduleDir: string, home: string): Promise<LoadedSchedules> {
@@ -167,7 +178,7 @@ interface BuildScheduleParams {
 
 function buildSchedule(params: BuildScheduleParams): Schedule | null {
   const { slug, path, frontmatter, body, home, warnings } = params;
-  warnUnknownFrontmatterKeys(frontmatter, path, warnings);
+  warnUnsupportedKeys(frontmatter, path, FRONTMATTER_KEYS, warnings);
   const cron = readCron(frontmatter, path, warnings);
   const cwd = readCwd(frontmatter, path, home, warnings);
   const name = readOptionalStringKey(frontmatter, 'name', path, warnings);
@@ -181,20 +192,11 @@ function buildSchedule(params: BuildScheduleParams): Schedule | null {
   return {
     slug,
     name: name ?? slug,
-    path,
     cron,
     cwd,
     ...(description !== undefined ? { description } : {}),
     prompt
   };
-}
-
-/** Mirrors `warnUnsupportedKeys`'s message format — its `JsonValue`-keyed record shape doesn't fit parsed YAML's `unknown` values. */
-function warnUnknownFrontmatterKeys(record: FrontmatterRecord, path: string, warnings: string[]): void {
-  const unsupported = Object.keys(record).filter(key => !FRONTMATTER_KEYS.includes(key));
-  if (unsupported.length > 0) {
-    warnings.push(`${path}: unsupported keys ignored: ${unsupported.join(', ')}`);
-  }
 }
 
 function readCron(record: FrontmatterRecord, path: string, warnings: string[]): string | null {
