@@ -9,13 +9,18 @@ import type { TerminalIntegrations } from './terminal-integrations.js';
 
 export interface LaunchSpec {
   readonly folder: AgentFolder;
+  /**
+   * The resolved per-agent state root this launch was projected from
+   * (`agent/state.ts`'s `stateDirFor`) — the parent of the three paths below.
+   * argv composition reads those concrete paths, never this root, so the argv
+   * always names the directories `commands/run.ts` actually created.
+   */
   readonly stateDir: string;
   /**
    * Where the generated providers extension is written (see
-   * `folder.providersJson`) and where `--session-dir` points, sourced from the
-   * plan's own `extensionsDir`/`sessionsDir` (`commands/run.ts` — the single
-   * derivation site; re-deriving from `stateDir` here risks silently
-   * disagreeing with a plan whose dirs were overridden after `planRun`).
+   * `folder.providersJson`) and where `--session-dir` points. Both are derived
+   * once from `agent/state.ts`'s `statePaths` in `commands/run.ts` — the single
+   * derivation site — and used verbatim here.
    */
   readonly extensionsDir: string;
   readonly sessionsDir: string;
@@ -55,8 +60,12 @@ export interface LaunchSpec {
    * printed) and on folders that declare no packages.
    */
   readonly packageEntries?: readonly string[];
-  /** Installed host terminal hooks and foreground detection hints discovered for this run. */
-  readonly terminalIntegrations?: TerminalIntegrations;
+  /**
+   * Discovered host terminal hook extensions and their sockets, plus any foreground-detection
+   * env (`HERDR_AGENT`). Always present: `getTerminalIntegrations` yields empty arrays and an
+   * empty env when nothing is installed, on Windows, or for a scheduled run.
+   */
+  readonly terminalIntegrations: TerminalIntegrations;
 }
 
 /**
@@ -112,7 +121,7 @@ export function composePiArgv(spec: LaunchSpec): string[] {
 
 function getExtensionFiles(spec: LaunchSpec): ReadonlySet<string> {
   return new Set([
-    ...(spec.terminalIntegrations?.extensionFiles ?? []),
+    ...spec.terminalIntegrations.extensionFiles,
     ...(spec.packageEntries ?? []),
     ...spec.folder.extensionFiles
   ]);
@@ -147,7 +156,7 @@ function getExtensionFiles(spec: LaunchSpec): ReadonlySet<string> {
 export function composeEnv(spec: LaunchSpec): Record<string, string> {
   return {
     ...(spec.sandbox ? { MISE_CACHE_DIR: spec.miseCacheDir } : {}),
-    ...spec.terminalIntegrations?.env
+    ...spec.terminalIntegrations.env
   };
 }
 

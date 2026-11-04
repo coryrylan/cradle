@@ -2,11 +2,21 @@ import { lookupBin, type WhichFn } from '../util/which.js';
 
 export interface DoctorCheck {
   readonly name: string;
-  readonly bin: string;
   readonly required: boolean;
   readonly found: string | null;
   readonly version: string | null;
   readonly note?: string;
+}
+
+/**
+ * Normalize a bin's `--version` stdout to the version token on its first line. Bins report
+ * differently — `pi` prints a bare `0.80.10`, `nono` prints `nono 0.68.0`, a git-style bin prints
+ * `v1.2.3` — so take the first version-shaped token rather than assuming a prefix, and keep the
+ * `v` when the bin itself prints one. Returns `null` when the first line carries none; later lines
+ * are ignored, since they are usually release-note prose.
+ */
+export function normalizeVersionOutput(stdout: string): string | null {
+  return stdout.split('\n')[0]?.match(/v?\d+\.\d+\S*/)?.[0] ?? null;
 }
 
 interface DoctorDeps {
@@ -45,7 +55,7 @@ function scheduleBackendNote(bin: 'launchctl' | 'systemctl'): string {
 
 /** A recommended (not required) check: `found`/`version` from the probe, `note` attached only when missing. */
 function optionalCheck(name: string, found: string | null, version: string | null, note: string): DoctorCheck {
-  return { name, bin: name, required: false, found, version, ...(found ? {} : { note }) };
+  return { name, required: false, found, version, ...(found ? {} : { note }) };
 }
 
 interface ProbedBins {
@@ -86,7 +96,7 @@ export async function runDoctor(deps: DoctorDeps = {}): Promise<DoctorCheck[]> {
     version(bins.schedulePath)
   ]);
   return [
-    { name: 'pi', bin: 'pi', required: true, found: bins.piPath, version: piVersion },
+    { name: 'pi', required: true, found: bins.piPath, version: piVersion },
     optionalCheck('nono', bins.nonoPath, nonoVersion, NONO_SANDBOX_NOTE),
     optionalCheck('mise', bins.misePath, miseVersion, MISE_RECOMMENDED_NOTE),
     ...(bins.scheduleBin !== null

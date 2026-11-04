@@ -35,6 +35,11 @@ export function isStringArray(value: JsonValue): value is string[] {
   return Array.isArray(value) && value.every(item => typeof item === 'string');
 }
 
+/** Host entries come from JSON or a CLI flag; stray whitespace would never match at proxy time. */
+export function trimHostEntries(hosts: readonly string[]): readonly string[] {
+  return hosts.map(host => host.trim()).filter(host => host !== '');
+}
+
 /**
  * Only absolute (POSIX, Windows drive-letter, or UNC), `~/`, or `$HOME/`
  * prefixed entries are trusted where a string becomes a nono grant/argv
@@ -48,7 +53,7 @@ export function isPathShaped(value: string): boolean {
 
 /** Warn once, naming every key in `record` not present in `supported`. */
 export function warnUnsupportedKeys(
-  record: { readonly [key: string]: JsonValue },
+  record: { readonly [key: string]: unknown },
   path: string,
   supported: readonly string[],
   warnings: string[]

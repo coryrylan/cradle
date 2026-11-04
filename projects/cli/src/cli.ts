@@ -6,7 +6,7 @@ import yargs from 'yargs';
 
 import pkg from '../package.json' with { type: 'json' };
 import { composeArgv, composeEnv } from './agent/launch.js';
-import { doctorExitCode, formatDoctorReport, runDoctor } from './commands/doctor.js';
+import { doctorExitCode, formatDoctorReport, normalizeVersionOutput, runDoctor } from './commands/doctor.js';
 import { materializeRun, planRun, type RunFlags, type RunPlan } from './commands/run.js';
 import {
   formatScheduleList,
@@ -207,7 +207,7 @@ function printScheduleDryRun(plan: SchedulePlan): void {
 }
 
 function printDryRun(plan: RunPlan): void {
-  for (const file of plan.files) console.log(`write: ${join(plan.extensionsDir, file.rel)}`);
+  for (const file of plan.files) console.log(`write: ${join(plan.launch.extensionsDir, file.rel)}`);
   if (plan.profile !== null) console.log(`write: ${plan.profile.path}`);
   if (plan.packages !== null) printPackagesPlan(plan.packages);
   console.log(`cwd: ${plan.cwd}`);
@@ -233,18 +233,17 @@ function printWarnings(warnings: readonly string[]): void {
 }
 
 /**
- * Read a bin's version output, normalized to a bare version string. Bins
- * report differently — `pi` prints a bare `0.80.10`, `nono` prints
- * `nono 0.68.0` — so extract the first
- * version-shaped token from the first line rather than assuming a prefix.
- * Returns `null` on spawn failure, non-zero exit, or no match.
+ * Read a bin's version output. stderr is ignored rather than captured, a missing bin resolves to
+ * `null` instead of rejecting (`Bun.spawn` throws ENOENT rather than exiting non-zero — the same
+ * reason `commands/schedule.ts` wraps its linger probe), and a non-zero exit reports no version.
+ * A bin that answers but prints nothing version-shaped is `null` too — see `normalizeVersionOutput`.
  */
 async function readBinVersion(binPath: string): Promise<string | null> {
   try {
     const proc = Bun.spawn([binPath, '--version'], { stdout: 'pipe', stderr: 'ignore' });
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     if (exitCode !== 0) return null;
-    return stdout.split('\n')[0]?.match(/v?\d+\.\d+\S*/)?.[0] ?? null;
+    return normalizeVersionOutput(stdout);
   } catch {
     return null;
   }

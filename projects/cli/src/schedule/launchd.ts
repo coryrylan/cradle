@@ -164,7 +164,6 @@ export function composeLaunchdTimer(context: TimerContext, fields: CronFields): 
   const domainTarget = `${domain}/${label}`;
 
   return {
-    id: label,
     files: [{ path: plistPath, content }],
     installSteps: [
       // Nothing may be loaded yet on a first install — a bootout against an

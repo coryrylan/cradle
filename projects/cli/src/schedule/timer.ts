@@ -36,8 +36,6 @@ export interface TimerStep {
 
 /** The platform-neutral result of composing a schedule's OS timer — the command layer's only input. */
 export interface TimerPlan {
-  /** The launchd label or the systemd unit base name — shown in `cradle schedule list`. */
-  readonly id: string;
   readonly files: readonly TimerFile[];
   readonly installSteps: readonly TimerStep[];
   readonly removeSteps: readonly TimerStep[];

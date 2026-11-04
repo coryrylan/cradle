@@ -36,6 +36,7 @@ function createSpec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
     nonoBin: 'nono',
     piBin: 'pi',
     profilePath: '/state/helper/nono-profile.json',
+    terminalIntegrations: { extensionFiles: [], socketPaths: [], env: {} },
     ...overrides
   };
 }
@@ -237,10 +238,9 @@ describe('composePiArgv', () => {
     expect(argv[0]).toBe('/home/u/.local/share/mise/shims/pi');
   });
 
-  it('should derive the providers -e path and --session-dir from the spec, never re-derive from stateDir', () => {
-    // stateDir stays the default ('/state/helper'), but extensionsDir/sessionsDir are
-    // overridden — proves composePiArgv trusts the spec's own fields instead of
-    // recomputing statePaths(spec.stateDir), which would disagree here.
+  it('should derive the providers -e path and --session-dir from the spec paths, not from the state root', () => {
+    // stateDir stays at its default while extensionsDir/sessionsDir point elsewhere: the argv must
+    // honor the concrete paths, because those are the directories `commands/run.ts` wrote to.
     const argv = composePiArgv(
       createSpec({
         folder: createFolder({ providersJson: '/agents/helper/models.json' }),
@@ -317,5 +317,44 @@ describe('composeEnv', () => {
 
   it('should return no env entries when unsandboxed, keeping the shared host mise cache', () => {
     expect(composeEnv(createSpec({ sandbox: false }))).toEqual({});
+  });
+
+  it('should merge the terminal integration env alongside the sandboxed mise cache', () => {
+    const spec = createSpec({
+      sandbox: true,
+      terminalIntegrations: { extensionFiles: [], socketPaths: ['/run/u/herdr.sock'], env: { HERDR_AGENT: 'pi' } }
+    });
+    expect(composeEnv(spec)).toEqual({ MISE_CACHE_DIR: '/state/helper/mise-cache', HERDR_AGENT: 'pi' });
+  });
+
+  it('should put the terminal integration env on an unsandboxed run too', () => {
+    const spec = createSpec({
+      terminalIntegrations: { extensionFiles: [], socketPaths: [], env: { HERDR_AGENT: 'pi' } }
+    });
+    expect(composeEnv(spec)).toEqual({ HERDR_AGENT: 'pi' });
+  });
+});
+
+describe('terminal integration extensions', () => {
+  it('should load the discovered hook file as an -e entry ahead of the agent’s own extensions', () => {
+    const spec = createSpec({
+      folder: createFolder({ extensionFiles: ['/agents/helper/extensions/custom.ts'] }),
+      terminalIntegrations: {
+        extensionFiles: ['/home/u/.pi/agent/extensions/herdr-agent-state.ts'],
+        socketPaths: ['/run/u/herdr.sock'],
+        env: { HERDR_AGENT: 'pi' }
+      }
+    });
+    const argv = composePiArgv(spec);
+    const hook = argv.indexOf('/home/u/.pi/agent/extensions/herdr-agent-state.ts');
+    expect(hook).toBeGreaterThan(-1);
+    expect(argv.indexOf('/agents/helper/extensions/custom.ts')).toBeGreaterThan(hook);
+  });
+
+  it('should add no hook -e entry when nothing was discovered', () => {
+    const spec = createSpec({ folder: createFolder({ extensionFiles: ['/agents/helper/extensions/custom.ts'] }) });
+    const argv = composePiArgv(spec);
+    expect(argv.filter(entry => entry.includes('.pi/agent/extensions'))).toEqual([]);
+    expect(argv).toContain('/agents/helper/extensions/custom.ts');
   });
 });

@@ -3,6 +3,7 @@ import { exists, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { agentId } from '../agent/state.js';
 import { createWhichStub, type WhichFn } from '../util/which.js';
 import { formatScheduleList, materializeSchedule, planSchedule, type ScheduleRunResult } from './schedule.js';
 
@@ -90,7 +91,8 @@ describe('planSchedule', () => {
     );
     // cwd deliberately has no `./assistant` directory, so this can only resolve via the alias table.
     const plan = await planSchedule({ dir: 'assistant', action: 'install' }, { ...darwinDeps(), cwd: root });
-    expect(plan.folder.dir).toBe(agentDir);
+    // `nightly.md` exists only in the aliased folder, so its target proves the resolution.
+    expect(plan.targets.map(target => target.schedule.slug)).toEqual(['nightly']);
   });
 
   it("should record the alias's resolved absolute path in the timer, not the alias name", async () => {
@@ -111,7 +113,9 @@ describe('planSchedule', () => {
   it('should default uid to process.getuid() when not injected', async () => {
     await addSchedule('nightly.md', { name: 'Nightly', cwd: root, cron: "'0 9 * * *'" }, 'Do it.');
     const plan = await planSchedule({ dir: agentDir, action: 'install' }, { home, which, platform: 'darwin' });
-    expect(plan.targets[0]?.timerPlan.id).toContain('nightly');
+    // The uid reaches nowhere else: launchd's `gui/<uid>` domain target is its only observable effect.
+    const domainTarget = `gui/${String(process.getuid?.() ?? 0)}/com.cradle.${agentId(agentDir)}.nightly`;
+    expect(plan.targets[0]?.timerPlan.installSteps[0]?.argv).toEqual(['launchctl', 'bootout', domainTarget]);
   });
 
   describe('list', () => {
@@ -134,6 +138,51 @@ describe('planSchedule', () => {
       expect(row?.status).toBe('not-installed');
       expect(row?.nextFire).not.toBeNull();
       expect(row?.cronError).toBeUndefined();
+      expect(row?.description).toBeUndefined();
+    });
+
+    it('should carry the frontmatter description onto the list row', async () => {
+      await addSchedule(
+        'described.md',
+        {
+          name: 'Described',
+          description: 'Summarize commits and open pull requests',
+          cwd: join(root, 'work'),
+          cron: "'0 9 * * *'"
+        },
+        'Do it.'
+      );
+      const plan = await planSchedule({ dir: agentDir, action: 'list' }, darwinDeps());
+      expect(plan.rows.find(row => row.slug === 'described')?.description).toBe(
+        'Summarize commits and open pull requests'
+      );
+    });
+
+    it('should print the description line under the task title and keep every value in one column', async () => {
+      await addSchedule(
+        'described.md',
+        { name: 'Described', description: 'Summarize commits', cwd: join(root, 'work'), cron: "'0 9 * * *'" },
+        'Do it.'
+      );
+      const plan = await planSchedule({ dir: agentDir, action: 'list' }, darwinDeps());
+      const described = formatScheduleList(plan.rows.filter(row => row.slug === 'described'));
+      const [title, description, cronLine, cwdLine, timerLine] = described.split('\n');
+      expect(title).toBe('described — Described');
+      expect(description).toMatch(/^\s+description:\s+Summarize commits$/);
+      expect(cronLine).toContain('0 9 * * *');
+      expect(cwdLine).toContain(join(root, 'work'));
+      expect(timerLine).toContain('not installed');
+      // One shared value column regardless of label length. The shared column is the contract; its
+      // width is layout, so the assertion stays tolerant of how much padding produces it.
+      const valueColumn = (line: string | undefined): number => line?.match(/^\s*\S+\s+/)?.[0].length ?? -1;
+      const columns = [description, cronLine, cwdLine, timerLine].map(valueColumn);
+      expect(columns).toEqual(columns.map(() => columns[0] ?? -1));
+      expect(columns[0]).toBeGreaterThan('description:'.length);
+    });
+
+    it('should print no description line for a task that declares none', async () => {
+      const plan = await planSchedule({ dir: agentDir, action: 'list' }, darwinDeps());
+      expect(formatScheduleList(plan.rows)).not.toContain('description:');
     });
 
     it('should list without throwing when "cradle" is unresolvable, unlike install\'s requireBin', async () => {

@@ -49,7 +49,6 @@ describe('loadSchedules', () => {
       {
         slug: 'standup',
         name: 'Daily standup report',
-        path: join(dir, 'standup.md'),
         cron: '0 9 * * 1-5',
         cwd: join(HOME, 'dev', 'my-project'),
         description: 'Summarize commits.',
@@ -66,7 +65,6 @@ describe('loadSchedules', () => {
       {
         slug: 'backup',
         name: 'backup',
-        path: join(dir, 'backup.md'),
         cron: '0 9 * * 1-5',
         cwd: join(HOME, 'dev', 'my-project'),
         prompt: 'Do the thing.'
