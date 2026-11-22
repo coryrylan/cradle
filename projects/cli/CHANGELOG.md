@@ -1,3 +1,14 @@
+## [1.7.0](https://github.com/coryrylan/cradle/compare/cradle-v1.6.0...cradle-v1.7.0) (2026-11-22)
+
+### Features
+
+* **cli:** mcp support ([5ae4e9f](https://github.com/coryrylan/cradle/commit/5ae4e9ffbe3f7cd702a725e988d3c198a5a0b3ea))
+
+### Bug Fixes
+
+* refactor nono ([c5c27f2](https://github.com/coryrylan/cradle/commit/c5c27f24b8924f2fd63e2b51e8aef0f4d7991bac))
+* remove sbx ([1d7f801](https://github.com/coryrylan/cradle/commit/1d7f80103fd9b3ae58f3904e1030fbc42a43d727))
+
 ## [1.6.0](https://github.com/coryrylan/cradle/compare/cradle-v1.5.0...cradle-v1.6.0) (2026-10-30)
 
 ### Features
